@@ -1,0 +1,63 @@
+# ── 依赖 ─────────────────────────────────────────────
+node_modules/
+
+# ── 构建产物 ─────────────────────────────────────────
+dist/
+target/
+src-tauri/target/
+target-selftest/
+src-tauri/gen/schemas/
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+
+# ── 临时 / 中间文件 ──────────────────────────────────
+.tmp/
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# ── i18n 工作产物（语言包本体在 src/i18n/locales/，必须提交）──
+i18n-*.json
+fr_new.json
+
+# ── 日志 ─────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+
+# ── Python（scripts/ 里的辅助脚本）───────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── 本地环境变量 / 密钥（绝不入库）───────────────────
+.env
+.env.local
+.env.*.local
+
+# ── 系统 ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+
+# ── 编辑器 / IDE ─────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# ── 注意：以下内容必须提交，请勿在此添加忽略规则 ──────
+# src/  src-tauri/src/  src-tauri/Cargo.toml  src-tauri/tauri.conf.json
+# assets/  docs/  scripts/  README.md  CONTRIBUTING.md  LICENSE
+# package.json  package-lock.json  src/i18n/locales/*.ts  .github/workflows/

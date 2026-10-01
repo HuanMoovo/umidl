@@ -1,0 +1,193 @@
+name: Release
+
+# 全平台构建：Windows / macOS(Apple Silicon + Intel) / Linux / Android
+#
+# 验证状态（详见 docs/BUILD.md）：
+#   * Windows x64 ...... 本机已验证（Umidl_1.8.1_x64-setup.exe）
+#   * Linux x64 ........ 本机 Docker(ubuntu:22.04) 已验证 deb/AppImage
+#   * macOS arm64/x64 .. 本机无 Xcode，无法本地验证，靠本工作流
+#   * Android aarch64 .. 本机无 JDK/SDK/NDK，无法本地验证，靠本工作流（且需移动端适配）
+#
+# 手动触发：Actions → Release → Run workflow（可只跑 Windows）。
+on:
+  workflow_dispatch:
+    inputs:
+      only_windows:
+        description: 只构建 Windows 产物
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    # 计算构建矩阵：workflow_dispatch 勾选 only_windows 时只留 Windows。
+    # 注意：matrix 上下文在 job 级 if 里不可用（GitHub 会拒绝解析整个工作流），
+    # 所以过滤放在这里输出成 JSON，build 用 fromJSON 消费。
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          ONLY_WINDOWS: ${{ inputs.only_windows }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          allp = [
+            {"platform": "windows-latest", "label": "Windows x64", "artifact": "windows-x64",
+             "args": "", "rust_targets": ""},
+            {"platform": "macos-latest", "label": "macOS arm64 (Apple Silicon)", "artifact": "macos-arm64",
+             "args": "--target aarch64-apple-darwin --bundles dmg", "rust_targets": "aarch64-apple-darwin"},
+            {"platform": "macos-latest", "label": "macOS x64 (Intel, 交叉编译)", "artifact": "macos-x64",
+             "args": "--target x86_64-apple-darwin --bundles dmg", "rust_targets": "x86_64-apple-darwin"},
+            {"platform": "ubuntu-22.04", "label": "Linux x64", "artifact": "linux-x64",
+             "args": "--bundles deb,appimage", "rust_targets": ""},
+          ]
+          only_win = os.environ.get("ONLY_WINDOWS", "").strip().lower() == "true"
+          inc = [p for p in allp if (not only_win or p["platform"] == "windows-latest")]
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装 Rust（stable）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Rust 构建缓存
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri 2 官方 Linux 依赖（webkit2gtk 4.1 / ayatana appindicator / libxdo）
+      - name: Linux 系统依赖（webkit2gtk 等）
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf build-essential curl wget file libssl-dev \
+            libxdo-dev pkg-config
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 前端门禁（类型检查 + 单元测试）
+        run: npx vue-tsc --noEmit && npx vitest run
+
+      - name: Rust 单元测试（令牌桶 / 过滤器 / 捕获解析 / aria2 参数）
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: 打包（Tauri Action）
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: umidl-${{ matrix.artifact }}
+          path: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/**/release/bundle/**/*.dmg
+            src-tauri/target/**/release/bundle/**/*.AppImage
+            src-tauri/target/**/release/bundle/**/*.deb
+            src-tauri/target/**/release/bundle/**/*.rpm
+            src-tauri/target/**/release/bundle/**/*.msi
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Android（Tauri 2 移动端）
+  # ⚠️ 本机（Windows）没有 JDK / Android SDK / NDK，此 job 从未在 runner 上跑过，
+  #    首次运行大概率需要微调（NDK 版本、gradle 下载、APK 签名）。详见 docs/BUILD.md。
+  # ------------------------------------------------------------------
+  android:
+    runs-on: ubuntu-22.04
+    name: Android aarch64 (APK, 实验性)
+    # 实验性：当前在 `rquickjs-sys 0.14.0`（插件沙箱 QuickJS 的 C 绑定）上编不过 aarch64-linux-android，
+    # 后面还有托盘 / 单实例 / 窗口特效等桌面专属依赖要 cfg 门控 —— 移动端适配是独立一轮工作。
+    # 用 continue-on-error 让本作业照常跑、照常给日志，但不拖红整轮发布（Windows/Linux/macOS 才是当前产线）。
+    continue-on-error: true
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.only_windows }}
+    env:
+      NDK_VERSION: 27.0.12077973
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Rust + Android 目标
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust 构建缓存
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # 默认会装 legacy 的 `tools` 包，该包早已从 SDK 仓库下架 →
+          # sdkmanager 报 "Failed to find package 'tools'" 退出 1（Release #3/#4 就是这么挂的）。
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: true
+
+      - name: 安装 Android NDK / platform-tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "ndk;$NDK_VERSION" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 生成 Android 工程（src-tauri/gen/android，未提交时由本步骤生成）
+        run: npx tauri android init --ci
+
+      - name: 构建 APK（debug 签名；release 需另配 keystore）
+        run: npx tauri android build --apk --target aarch64 --debug
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: umidl-android-aarch64
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/target/**/release/*.apk
+          if-no-files-found: warn

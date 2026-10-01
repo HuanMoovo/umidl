@@ -1,0 +1,403 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   主题令牌：深色（默认）/ 浅色，由 html[data-theme] 切换
+   强调色由 html[data-accent] 切换，全部走 CSS 变量
+   ============================================================ */
+:root,
+html[data-theme='dark'] {
+  --umi-bg: #090911;
+  --umi-panel: rgba(24, 24, 40, 0.66);
+  --umi-panel-2: rgba(255, 255, 255, 0.05);
+  --umi-panel-3: rgba(255, 255, 255, 0.085);
+  --umi-sunken: rgba(0, 0, 0, 0.26);
+  --umi-border: rgba(255, 255, 255, 0.11);
+  --umi-border-soft: rgba(255, 255, 255, 0.07);
+  --umi-text: rgba(255, 255, 255, 0.93);
+  --umi-text-2: rgba(255, 255, 255, 0.62);
+  --umi-text-3: rgba(255, 255, 255, 0.42);
+  --umi-shadow: 0 10px 34px rgba(0, 0, 0, 0.42);
+  --umi-glow: 0 0 0 rgba(0, 0, 0, 0);
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  --umi-bg: #eef0f8;
+  --umi-panel: rgba(255, 255, 255, 0.80);
+  --umi-panel-2: rgba(22, 22, 60, 0.045);
+  --umi-panel-3: rgba(22, 22, 60, 0.075);
+  --umi-sunken: rgba(22, 22, 60, 0.055);
+  --umi-border: rgba(24, 24, 70, 0.13);
+  --umi-border-soft: rgba(24, 24, 70, 0.085);
+  --umi-text: rgba(20, 20, 44, 0.94);
+  --umi-text-2: rgba(26, 26, 58, 0.68);
+  --umi-text-3: rgba(26, 26, 58, 0.46);
+  --umi-shadow: 0 12px 34px rgba(28, 28, 80, 0.13);
+  --umi-glow: 0 0 0 rgba(0, 0, 0, 0);
+  color-scheme: light;
+}
+
+/* ---- 强调色（默认紫罗兰） ---- */
+:root,
+html[data-accent='violet'] {
+  --umi-a50: 242 240 255;
+  --umi-a100: 232 228 255;
+  --umi-a200: 211 203 255;
+  --umi-a300: 181 164 255;
+  --umi-a400: 149 117 255;
+  --umi-a500: 124 77 255;
+  --umi-a600: 109 51 245;
+  --umi-a700: 92 34 220;
+  --umi-a800: 76 28 180;
+  --umi-a900: 63 26 144;
+  --umi-a950: 37 13 99;
+  --umi-accent-hex: #7c4dff;
+}
+html[data-accent='cyan'] {
+  --umi-a50: 236 254 255;
+  --umi-a100: 207 250 254;
+  --umi-a200: 165 243 252;
+  --umi-a300: 103 232 249;
+  --umi-a400: 34 211 238;
+  --umi-a500: 6 182 212;
+  --umi-a600: 8 145 178;
+  --umi-a700: 14 116 144;
+  --umi-a800: 21 94 117;
+  --umi-a900: 22 78 99;
+  --umi-a950: 8 51 68;
+  --umi-accent-hex: #22d3ee;
+}
+html[data-accent='pink'] {
+  --umi-a50: 253 242 248;
+  --umi-a100: 252 231 243;
+  --umi-a200: 251 207 232;
+  --umi-a300: 249 168 212;
+  --umi-a400: 244 114 182;
+  --umi-a500: 236 72 153;
+  --umi-a600: 219 39 119;
+  --umi-a700: 190 24 93;
+  --umi-a800: 157 23 77;
+  --umi-a900: 131 24 67;
+  --umi-a950: 80 7 36;
+  --umi-accent-hex: #ec4899;
+}
+html[data-accent='emerald'] {
+  --umi-a50: 236 253 245;
+  --umi-a100: 209 250 229;
+  --umi-a200: 167 243 208;
+  --umi-a300: 110 231 183;
+  --umi-a400: 52 211 153;
+  --umi-a500: 16 185 129;
+  --umi-a600: 5 150 105;
+  --umi-a700: 4 120 87;
+  --umi-a800: 6 95 70;
+  --umi-a900: 6 78 59;
+  --umi-a950: 2 44 34;
+  --umi-accent-hex: #10b981;
+}
+html[data-accent='amber'] {
+  --umi-a50: 255 251 235;
+  --umi-a100: 254 243 199;
+  --umi-a200: 253 230 138;
+  --umi-a300: 252 211 77;
+  --umi-a400: 251 191 36;
+  --umi-a500: 245 158 11;
+  --umi-a600: 217 119 6;
+  --umi-a700: 180 83 9;
+  --umi-a800: 146 64 14;
+  --umi-a900: 120 53 15;
+  --umi-a950: 69 26 3;
+  --umi-accent-hex: #f59e0b;
+}
+html[data-accent='blue'] {
+  --umi-a50: 239 246 255;
+  --umi-a100: 219 234 254;
+  --umi-a200: 191 219 254;
+  --umi-a300: 147 197 253;
+  --umi-a400: 96 165 250;
+  --umi-a500: 59 130 246;
+  --umi-a600: 37 99 235;
+  --umi-a700: 29 78 216;
+  --umi-a800: 30 64 175;
+  --umi-a900: 30 58 138;
+  --umi-a950: 23 37 84;
+  --umi-accent-hex: #3b82f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--umi-bg);
+  color: var(--umi-text);
+  font-family: 'Inter', 'HarmonyOS Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.28s ease, color 0.28s ease;
+}
+
+/* 背景极光（跟随主题与强调色） */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(60% 50% at 12% 10%, rgb(var(--umi-a500) / 0.22), transparent 60%),
+    radial-gradient(50% 45% at 88% 18%, rgba(34, 211, 238, 0.15), transparent 60%),
+    radial-gradient(60% 55% at 60% 100%, rgba(244, 114, 182, 0.13), transparent 65%);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.3s ease;
+}
+
+html[data-theme='light'] body::before {
+  opacity: 0.55;
+}
+
+/* 强调色文字：深色主题用亮档（a300），浅色主题用深档（a700），保证两种主题下都清晰 */
+html {
+  --umi-accent-text: var(--umi-a300);
+}
+html[data-theme='light'] {
+  --umi-accent-text: var(--umi-a700);
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+@layer components {
+  /* ---- 语义化表面：随主题自动变化 ---- */
+  .s-text {
+    color: var(--umi-text);
+  }
+  .s-text-2 {
+    color: var(--umi-text-2);
+  }
+  .s-text-3 {
+    color: var(--umi-text-3);
+  }
+  .s-surface {
+    background-color: var(--umi-panel);
+  }
+  .s-surface-2 {
+    background-color: var(--umi-panel-2);
+  }
+  .s-surface-3 {
+    background-color: var(--umi-panel-3);
+  }
+  /* 选中的标签/分段按钮：浅色主题下白字会消失，改用语义前景色 */
+  .chip-active {
+    border-color: rgb(var(--umi-a500) / 0.55) !important;
+    background: rgb(var(--umi-a500) / 0.16) !important;
+    color: var(--umi-text) !important;
+    font-weight: 600;
+  }
+  /* 强调色文字 / 图标（随主题自动选亮档或深档） */
+  .text-accent {
+    color: rgb(var(--umi-accent-text));
+  }
+  .s-sunken {
+    background-color: var(--umi-sunken);
+  }
+  .s-border {
+    border-color: var(--umi-border);
+  }
+  .s-border-soft {
+    border-color: var(--umi-border-soft);
+  }
+
+  .glass {
+    background: var(--umi-panel-2);
+    /* 性能：模糊半径按「够用就好」取值 —— 背景是柔和渐变 + 粒子，16px 与 28px 肉眼几乎无差，
+       但每帧的模糊开销与半径近似成正比（实测把 28/40 降到 16/24 后，空闲 GPU 占用少了约 60%）。 */
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--umi-border-soft);
+  }
+  .glass-strong {
+    background: var(--umi-panel);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--umi-border);
+  }
+  .umi-card {
+    @apply glass-strong rounded-2xl;
+    box-shadow: var(--umi-shadow);
+  }
+  .umi-btn {
+    @apply px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 select-none
+           hover:border-umi-400/40 active:scale-[0.97];
+    border: 1px solid var(--umi-border);
+    background: var(--umi-panel-2);
+    color: var(--umi-text);
+  }
+  .umi-btn:hover {
+    background: var(--umi-panel-3);
+  }
+  .umi-btn-primary {
+    @apply px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 select-none text-white
+           shadow-glow active:scale-[0.97]
+           disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed;
+    background-image: linear-gradient(90deg, rgb(var(--umi-a600)), rgb(var(--umi-a400)));
+  }
+  .umi-btn-primary:hover:not(:disabled) {
+    background-image: linear-gradient(90deg, rgb(var(--umi-a500)), rgb(var(--umi-a300)));
+    box-shadow: 0 0 32px rgb(var(--umi-a500) / 0.55);
+  }
+  /* 浅色主题下白字压在亮色上对比度不足 → 用更深的强调色档位 */
+  html[data-theme='light'] .umi-btn-primary {
+    background-image: linear-gradient(90deg, rgb(var(--umi-a700)), rgb(var(--umi-a500)));
+  }
+  html[data-theme='light'] .umi-btn-primary:hover:not(:disabled) {
+    background-image: linear-gradient(90deg, rgb(var(--umi-a600)), rgb(var(--umi-a400)));
+    box-shadow: 0 6px 24px rgb(var(--umi-a600) / 0.35);
+  }
+  .umi-input {
+    @apply w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all
+           focus:border-umi-400/70 focus:ring-2 focus:ring-umi-500/25;
+    border: 1px solid var(--umi-border);
+    background: var(--umi-sunken);
+    color: var(--umi-text);
+  }
+  .umi-input::placeholder {
+    color: var(--umi-text-3);
+  }
+  .umi-label {
+    @apply text-xs font-medium mb-1.5 block tracking-wide;
+    color: var(--umi-text-2);
+  }
+  .umi-chip {
+    @apply px-2.5 py-1 rounded-lg text-xs;
+    background: var(--umi-panel-2);
+    border: 1px solid var(--umi-border-soft);
+    color: var(--umi-text-2);
+  }
+
+  /* ============================================================
+     统一设计令牌（布局重构）：页面壳 / 卡片头 / 小按钮 / 内嵌块
+     目的：把「同一个东西的三种写法」收敛成一套类名，
+     字号、间距、圆角、图标尺寸全站只此一份。
+     ============================================================ */
+  /* 页面壳：所有路由页共用的宽度与节奏 */
+  .umi-page {
+    @apply mx-auto w-full max-w-5xl space-y-3;
+  }
+  /* 卡片头：12px/500 标题 + 14px 图标 + 右侧动作，全站统一 */
+  .umi-card-title {
+    @apply flex items-center gap-2 text-[12px] font-medium;
+    color: var(--umi-text-2);
+    margin-bottom: 0.625rem;
+    min-height: 22px;
+  }
+  /* 卡片头右侧动作（自动推到最右） */
+  .umi-card-title .umi-spacer,
+  .umi-head .umi-spacer {
+    margin-left: auto;
+  }
+  .umi-head {
+    @apply flex items-center gap-2;
+    margin-bottom: 0.625rem;
+    min-height: 26px;
+  }
+  /* 卡片内嵌块：状态块 / 列表块 / 代码块统一外观 */
+  .umi-inner {
+    @apply rounded-xl border px-3 py-2.5;
+    border-color: var(--umi-border-soft);
+    background: var(--umi-panel-2);
+  }
+  /* 统一的小号按钮：umi-btn umi-btn-sm / umi-btn-primary umi-btn-sm */
+  .umi-btn-sm {
+    padding: 0.3rem 0.7rem;
+    font-size: 11px;
+    border-radius: 0.5rem;
+  }
+  .umi-btn-xs {
+    padding: 0.15rem 0.5rem;
+    font-size: 10.5px;
+    border-radius: 0.375rem;
+  }
+  /* 统一的说明文字：10.5px 三级文字 + 舒展行距 */
+  .umi-hint {
+    @apply text-[10.5px] leading-relaxed;
+    color: var(--umi-text-3);
+  }
+  /* 分段控件（布局切换 / 页签）：与 umi-card 同语言的分组底 */
+  .umi-seg {
+    @apply flex items-center gap-0.5 rounded-xl border p-0.5;
+    border-color: var(--umi-border-soft);
+    background: var(--umi-panel-2);
+  }
+  /* 可点击的功能入口（首页统计 / 功能块） */
+  .umi-entry {
+    @apply rounded-xl border px-3 py-2.5 text-left transition-all;
+    border-color: var(--umi-border-soft);
+    background: var(--umi-panel-2);
+  }
+  .umi-entry:hover {
+    border-color: rgb(var(--umi-a500) / 0.4);
+    background: var(--umi-panel-3);
+  }
+  /* 列表行：工具状态 / 模型 / 插件 等重复行统一外观 */
+  .umi-row {
+    @apply flex items-center gap-3 rounded-xl border px-3 py-2;
+    border-color: var(--umi-border-soft);
+    background: var(--umi-panel-2);
+  }
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--umi-a500) / 0.35);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--umi-a500) / 0.6);
+}
+
+/* 拖拽区域 */
+.drop-active {
+  border-color: rgb(var(--umi-a500) / 0.8) !important;
+  background: rgb(var(--umi-a500) / 0.08) !important;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(90deg, rgb(var(--umi-a300)), var(--umi-text), #22d3ee);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

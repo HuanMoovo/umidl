@@ -1,0 +1,75 @@
+# Umidl Linux 构建镜像（Tauri 2 官方 Linux 依赖 + Node 20 + Rust stable）
+# 用法见 scripts/docker/build-linux.sh 与 docs/BUILD.md
+#
+# 说明：
+#   * 中国大陆网络下 archive.ubuntu.com 常常 0 字节卡死，这里换成 aliyun 镜像；
+#   * crates.io 稀疏索引在本机网络不可达，改用 USTC 镜像（见 /usr/local/cargo/config.toml）；
+#   * Node 用 npmmirror 二进制分发（可绕开 deb.nodesource.com 的不稳定）。
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# ---------- apt 镜像 + Tauri 2 Linux 运行时/构建依赖 ----------
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; \
+            s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' \
+        /etc/apt/sources.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libwebkit2gtk-4.1-dev \
+      libgtk-3-dev \
+      libayatana-appindicator3-dev \
+      librsvg2-dev \
+      libxdo-dev \
+      patchelf \
+      build-essential \
+      curl \
+      wget \
+      file \
+      libssl-dev \
+      pkg-config \
+      ca-certificates \
+      xz-utils \
+      squashfs-tools \
+      libfuse2 \
+      git \
+      dpkg-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------- Node 20（npmmirror 二进制） ----------
+ARG NODE_VERSION=v20.19.5
+RUN curl -fsSL -o /tmp/node.tar.xz \
+      "https://registry.npmmirror.com/-/binary/node/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz" \
+ && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+      --exclude=CHANGELOG.md --exclude=LICENSE --exclude=README.md \
+ && rm /tmp/node.tar.xz \
+ && node -v && npm -v
+
+# ---------- Rust stable（USTC 镜像） ----------
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static \
+    RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
+ && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable --no-modify-path \
+ && rm /tmp/rustup-init.sh
+ENV PATH=/usr/local/cargo/bin:$PATH
+
+# ---------- cargo 国内镜像 ----------
+RUN mkdir -p "$CARGO_HOME" && cat > "$CARGO_HOME/config.toml" <<'EOF'
+[source.crates-io]
+replace-with = "ustc"
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+[net]
+retry = 5
+EOF
+
+# ---------- 构建脚本（容器内执行） ----------
+COPY linux-build-inner.sh /usr/local/bin/linux-build-inner.sh
+RUN chmod +x /usr/local/bin/linux-build-inner.sh
+
+WORKDIR /build
+CMD ["bash", "/usr/local/bin/linux-build-inner.sh"]

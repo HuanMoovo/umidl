@@ -1,0 +1,55 @@
+[package]
+name = "umidl"
+version = "1.8.10"
+description = "Umidl - 轻量化视频下载 / 转换 / AI 字幕桌面客户端"
+authors = ["umi"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "umi_downloader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "image-png", "image-ico"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tokio = { version = "1", features = ["time"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+dirs = "5"
+encoding_rs = "0.8"
+anyhow = "1"
+thiserror = "1"
+regex = "1"
+quick-xml = "0.42"
+sha2 = "0.10"
+rquickjs = "0.14"
+
+# Unix 侧需要按进程组杀进程树（见 tools.rs::kill_tree）：Windows 用 taskkill /T，
+# Unix 只能用 libc::kill(-pgid)。libc 本来就在依赖树里（tauri 传递依赖），无新增体积。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[features]
+# 端到端自检模块：仅开发 / CI 使用（cargo build --features selftest）
+# 正式发布的桌面客户端不包含这部分代码
+selftest = []
+
+[profile.dev]
+incremental = true
