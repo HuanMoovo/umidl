@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo-cat-256.png" alt="Umidl" width="150" />
+<img src="assets/logo-256.png" alt="Umidl" width="150" />
 
 # Umidl
 
