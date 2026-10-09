@@ -1,17 +1,18 @@
 import { tr } from '@/i18n'
+import { normalizeAppearanceStyle, parseGradient } from '@/utils/accent'
 /**
- * 主题系统：深色 / 浅色 / 跟随系统（昼夜自动切换）+ 强调色
+ * 主题系统：深色 / 浅色 + 强调色
  * 所有令牌走 CSS 变量，切换时无需重新加载页面
+ * （「跟随系统」已移除：历史配置里的 'system' 一律回退深色，不报错。）
  */
 
-export type ThemeMode = 'dark' | 'light' | 'system'
+export type ThemeMode = 'dark' | 'light'
 export type AccentName = 'violet' | 'cyan' | 'pink' | 'emerald' | 'amber' | 'blue'
 
 export function themeModes(): { value: ThemeMode; label: string; hint: string }[] {
   return [
   { value: 'light', label: tr('浅色'), hint: tr('白天模式') },
   { value: 'dark', label: tr('深色'), hint: tr('夜间模式') },
-    { value: 'system', label: tr('跟随系统'), hint: tr('随系统昼夜自动切换') },
   ]
 }
 
@@ -31,11 +32,17 @@ export function systemPrefersDark(): boolean {
   return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
 }
 
-/** 把主题模式解析成实际生效的明暗 */
+/**
+ * 主题值归一：只认 'light'，其余（含历史配置里的 'system' / 未知脏值）一律回退 'dark'。
+ * 「跟随系统」已移除 —— 旧配置不需要迁移，读取时静默回退即可。
+ */
+export function normalizeTheme(mode: string | undefined | null): ThemeMode {
+  return mode === 'light' ? 'light' : 'dark'
+}
+
+/** 把主题模式解析成实际生效的明暗（跟随系统已移除：'system' 与未知值都回退深色） */
 export function resolveTheme(mode: ThemeMode | string | undefined): 'dark' | 'light' {
-  const m = (mode || 'system') as ThemeMode
-  if (m === 'system') return systemPrefersDark() ? 'dark' : 'light'
-  return m === 'light' ? 'light' : 'dark'
+  return normalizeTheme(mode)
 }
 
 export function accentHex(accent: string | undefined): string {
@@ -62,7 +69,48 @@ export function applyTheme(mode: ThemeMode | string | undefined, accent: string 
   return resolved
 }
 
-/** 监听系统昼夜变化（仅在“跟随系统”时回调） */
+/* ============================================================
+   外观风格（1.10）：glass 玻璃拟态（默认） | mono 黑白简约
+   写 <html data-style>，具体覆盖规则在 style.css 的 [data-style='mono'] 作用域里；
+   这里只负责把值落到 DOM，纯校验住在 utils/accent.ts（可单测）。
+   ============================================================ */
+export function applyAppearanceStyle(style: string | null | undefined): 'glass' | 'mono' {
+  const resolved = normalizeAppearanceStyle(style)
+  if (typeof document !== 'undefined') document.documentElement.dataset.style = resolved
+  return resolved
+}
+
+/* ============================================================
+   自定义渐变（1.10）：'起色,止色' → --accent-grad-a / --accent-grad-b
+   非空且合法时注入根元素（侧栏选中项、主按钮、标题渐变共用）；
+   空 / 非法时清除变量，样式自动回落到强调色渐变（现状）。
+   ============================================================ */
+export function applyAccentGradient(gradient: string | null | undefined): boolean {
+  const g = parseGradient(gradient)
+  if (!g || typeof document === 'undefined') {
+    clearAccentGradient()
+    return false
+  }
+  const el = document.documentElement
+  el.style.setProperty('--accent-grad-a', g.from)
+  el.style.setProperty('--accent-grad-b', g.to)
+  el.dataset.grad = '1'
+  return true
+}
+
+/** 清除自定义渐变变量（回到强调色渐变） */
+export function clearAccentGradient(): void {
+  if (typeof document === 'undefined') return
+  const el = document.documentElement
+  el.style.removeProperty('--accent-grad-a')
+  el.style.removeProperty('--accent-grad-b')
+  delete el.dataset.grad
+}
+
+/**
+ * 监听系统昼夜变化（跟随系统已移除：保留为纯工具函数 / 单测对象，不再接入界面）。
+ * 用法：返回取消订阅函数。
+ */
 export function onSystemThemeChange(cb: (dark: boolean) => void): () => void {
   if (typeof window === 'undefined' || !window.matchMedia) return () => {}
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -72,7 +120,8 @@ export function onSystemThemeChange(cb: (dark: boolean) => void): () => void {
 }
 
 /**
- * 「跟随系统」的兜底监听：**媒体查询事件 + 定时轮询 + 回到窗口复核**，三条路一起上。
+ * 系统昼夜监听的强力版：**媒体查询事件 + 定时轮询 + 回到窗口复核**，三条路一起上。
+ * （跟随系统已移除：保留为纯工具函数 / 单测对象，不再接入界面。）
  *
  * 为什么不能只订阅媒体查询事件：`prefers-color-scheme` 的变化依赖**系统广播**
  * （Windows 的 WM_SETTINGCHANGE / ImmersiveColorSet）。实测中，第三方自动昼夜
@@ -265,9 +314,10 @@ export function accentColorHex(accent: string | undefined | null): string {
   return accentHex(v)
 }
 
-/** 生成 naive-ui 的主题覆盖（跟随强调色与明暗）；accent 可以是预设名，也可以是自定义 hex */
-export function naiveOverrides(accent: string | undefined, dark: boolean) {
-  const hex = accentColorHex(accent)
+/** 生成 naive-ui 的主题覆盖（跟随强调色与明暗）；accent 可以是预设名，也可以是自定义 hex。
+ *  mono = 黑白简约（1.10）：强调色退化为黑 / 白反色，开关与进度条一起跟着变。 */
+export function naiveOverrides(accent: string | undefined, dark: boolean, mono = false) {
+  const hex = mono ? (dark ? '#ffffff' : '#101010') : accentColorHex(accent)
   const light = dark ? hex : shadeColor(hex, 0.08)
   return {
     common: {
@@ -284,6 +334,14 @@ export function naiveOverrides(accent: string | undefined, dark: boolean) {
       borderColor: dark ? 'rgba(255,255,255,0.10)' : 'rgba(24,24,70,0.13)',
       textColorBase: dark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,44,0.94)',
     },
+    // 黑白简约：白色轨道上用黑滑块（反之亦然），避免滑点在轨道上「消失」
+    Switch: mono
+      ? { railColorActive: hex, buttonColor: dark ? '#000000' : '#ffffff' }
+      : {},
+    Slider: mono ? { fillColor: hex, handleColor: dark ? '#000000' : '#ffffff' } : {},
+    Checkbox: mono
+      ? { colorChecked: hex, borderChecked: hex, checkMarkColor: dark ? '#000000' : '#ffffff' }
+      : {},
     Card: {
       color: dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.72)',
       borderColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,70,0.10)',
@@ -292,7 +350,7 @@ export function naiveOverrides(accent: string | undefined, dark: boolean) {
     Select: { peers: { InternalSelection: { color: dark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.85)' } } },
     Progress: {
       railColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(24,24,70,0.10)',
-      fillColor: `linear-gradient(90deg,${hex},#22d3ee)`,
+      fillColor: mono ? hex : `linear-gradient(90deg,${hex},#22d3ee)`,
     },
   }
 }

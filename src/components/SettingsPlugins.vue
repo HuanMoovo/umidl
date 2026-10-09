@@ -2,47 +2,44 @@
 /**
  * 插件管理（1.6：从独立页面搬进「设置 → 插件」页签，逻辑与事件订阅保持不变）
  *
- *  - plugin_sandbox_info()  沙箱信息（引擎 / 内存上限 / 脚本超时）
- *  - plugin_list()          已安装插件（启用开关 / 测试 / 卸载）
- *  - plugin_market_list()   内容寻址市场（sha256 + 大小 + 安装，安装后比对摘要）
- *  - plugin_run_resolvers() 解析器试跑（可选）
- *  - plugin://event         事件日志（追加，最多保留 200 条）
+ *  - plugin_sandbox_info()      沙箱信息（引擎 / 内存上限 / 脚本超时）
+ *  - plugin_install_from_url()  从 GitHub 仓库 / https 直链安装（极简入口卡片）
+ *  - plugin_list()              已安装插件（启用开关 / 测试 / 卸载）
+ *  - plugin_run_resolvers()     解析器试跑（可选）
+ *  - plugin://event             插件事件（仅错误级别转提示；事件日志 UI 已移除）
  *
+ * 插件页极简（1.11）：市场浏览卡片与事件日志块已移除；安装入口只保留「从 GitHub 安装」
+ * （后端 plugin_install_from_url 负责：仅 https、≤ 5 MB、超时 60 s、只落盘不执行）。
  * 旧入口 `#/plugins` 由路由重定向到 `#/settings?tab=plugins`，本组件不受影响。
  * 浏览器预览（非 Tauri）下会读不到任何数据，这里用 isTauri() 守卫优雅降级。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NIcon, NProgress, NSwitch, useMessage } from 'naive-ui'
+import { NIcon, NSwitch, useMessage } from 'naive-ui'
 import {
   AlertCircleOutline,
   CheckmarkCircleOutline,
   CloudDownloadOutline,
   CubeOutline,
   ExtensionPuzzleOutline,
-  InformationCircleOutline,
   ListOutline,
   RefreshOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { isTauri } from '@/services/ipc'
 import { useTaskStore } from '@/stores/tasks'
-import { formatBytes } from '@/services/utils'
 import {
   onPluginEvent,
   onPluginInstalled,
-  pluginInstall,
+  pluginInstallFromUrl,
   pluginList,
-  pluginMarketList,
   pluginRunResolvers,
   pluginSandboxInfo,
   pluginSetEnabled,
   pluginTest,
   pluginUninstall,
-  sameSha,
   shortSha,
   type PluginInfo,
-  type PluginMarketEntry,
   type PluginSandboxInfo,
   type PluginTestResult,
 } from '@/services/plugins'
@@ -56,37 +53,10 @@ const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 const sandbox = ref<PluginSandboxInfo | null>(null)
 const installed = ref<PluginInfo[]>([])
-const market = ref<PluginMarketEntry[]>([])
 const loading = ref(false)
 const busy = ref('')
 const testResults = ref<Record<string, PluginTestResult>>({})
-/** 安装后的摘要校验结果（插件 id → 是否与市场一致） */
-const verify = ref<Record<string, { ok: boolean; sha256: string }>>({})
 const error = ref('')
-
-/* ------------------------- 事件日志 ------------------------- */
-interface LogLine {
-  time: string
-  level: string
-  id: string
-  event: string
-  message: string
-}
-const MAX_LOGS = 200
-const logs = ref<LogLine[]>([])
-
-function pushLog(level: string, id: string, event: string, text: string) {
-  const time = new Date().toLocaleTimeString()
-  logs.value = [{ time, level, id, event, message: text }, ...logs.value].slice(0, MAX_LOGS)
-}
-
-function levelClass(level: string): string {
-  const l = (level || '').toLowerCase()
-  if (l === 'error') return 'text-rose-500'
-  if (l === 'warn' || l === 'warning') return 'text-amber-600 dark:text-amber-400'
-  if (l === 'debug') return 's-text-3'
-  return 'text-emerald-600 dark:text-emerald-400'
-}
 
 /* ------------------------- 数据加载 ------------------------- */
 async function refreshAll(silent = false) {
@@ -97,10 +67,9 @@ async function refreshAll(silent = false) {
   loading.value = true
   error.value = ''
   try {
-    const [s, list, m] = await Promise.all([pluginSandboxInfo(), pluginList(), pluginMarketList()])
+    const [s, list] = await Promise.all([pluginSandboxInfo(), pluginList()])
     sandbox.value = s
     installed.value = Array.isArray(list) ? list : []
-    market.value = Array.isArray(m) ? m : []
   } catch (e: any) {
     error.value = String(e?.message ?? e)
     if (!silent) message.error(error.value)
@@ -118,27 +87,38 @@ async function reloadInstalled() {
   }
 }
 
-/* ------------------------- 安装 / 卸载 / 启用 / 测试 ------------------------- */
-async function install(entry: PluginMarketEntry) {
+/* ------------------------- 从 GitHub / https 直链安装 ------------------------- */
+const installUrl = ref('')
+const installBusy = ref(false)
+const installError = ref('')
+const installOk = ref('')
+
+async function installFromUrl() {
+  const url = installUrl.value.trim()
+  if (!url) return
   if (!inTauri) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
-  busy.value = `install:${entry.id}`
+  installBusy.value = true
+  installError.value = ''
+  installOk.value = ''
   try {
-    await pluginInstall(entry.id)
-    message.success(`${tr('插件已安装')}：${entry.name || entry.id}`)
+    const info = await pluginInstallFromUrl(url)
+    const name = info?.name || info?.id || url
+    installOk.value = String(name)
+    message.success(`${tr('插件已安装')}：${name}`)
+    installUrl.value = ''
     await reloadInstalled()
-    // 安装后显示校验结果：用装完的实际 sha256 与市场条目比对
-    const got = installed.value.find((p) => p.id === entry.id)
-    verify.value = { ...verify.value, [entry.id]: { ok: sameSha(got?.sha256, entry.sha256), sha256: String(got?.sha256 ?? '') } }
   } catch (e: any) {
-    message.error(String(e?.message ?? e))
+    installError.value = String(e?.message ?? e)
+    message.error(installError.value)
   } finally {
-    busy.value = ''
+    installBusy.value = false
   }
 }
 
+/* ------------------------- 卸载 / 启用 / 测试 ------------------------- */
 async function uninstall(p: PluginInfo) {
   if (!inTauri) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
@@ -148,9 +128,6 @@ async function uninstall(p: PluginInfo) {
   try {
     await pluginUninstall(p.id)
     message.success(`${tr('插件已卸载')}：${p.name || p.id}`)
-    const next = { ...verify.value }
-    delete next[p.id]
-    verify.value = next
     const tr2 = { ...testResults.value }
     delete tr2[p.id]
     testResults.value = tr2
@@ -230,12 +207,11 @@ let offInstalled: (() => void) | null = null
 
 onMounted(async () => {
   await refreshAll(true)
+  // 事件日志 UI 已移除（插件页极简）：仍订阅事件，只把错误级别转成一条提示
   offEvent = await onPluginEvent((p) => {
-    pushLog(p.level || 'info', p.id || '', p.event || '', p.message || '')
     if ((p.level || '').toLowerCase() === 'error') message.error(`${p.id ? `${p.id} · ` : ''}${p.message}`)
   })
   offInstalled = await onPluginInstalled(async () => {
-    pushLog('info', '', 'installed', tr('插件列表已更新'))
     await reloadInstalled()
   })
 })
@@ -246,11 +222,49 @@ onUnmounted(() => {
 })
 
 const sandboxReady = computed(() => !!sandbox.value?.available)
-const marketCount = computed(() => market.value.length)
 </script>
 
 <template>
   <div class="space-y-3" data-test="settings-plugins">
+    <!-- 从 GitHub 安装：地址输入 + 安装按钮（仅 https；体积 / 超时 / 净化由后端负责） -->
+    <div class="umi-card p-4" data-test="plugin-install-url">
+      <div class="umi-card-title">
+        <NIcon :size="14" :component="CloudDownloadOutline" class="text-accent" />{{ $t('从 GitHub 安装') }}
+      </div>
+      <div class="flex gap-2">
+        <input
+          v-model="installUrl"
+          class="umi-input flex-1 !text-[11.5px]"
+          :placeholder="$t('粘贴 GitHub 仓库地址（https://github.com/owner/repo）或 .js / 清单 JSON 的 https 直链')"
+          spellcheck="false"
+          :disabled="installBusy"
+          @keyup.enter="installFromUrl"
+        />
+        <button
+          class="umi-btn-primary umi-btn-sm whitespace-nowrap"
+          :disabled="installBusy || !installUrl.trim()"
+          @click="installFromUrl"
+        >
+          {{ installBusy ? $t('安装中…') : $t('安装') }}
+        </button>
+      </div>
+      <div
+        v-if="installError"
+        class="mt-2 break-all rounded-lg border border-rose-500/25 bg-rose-500/10 px-2.5 py-1.5 font-mono text-[10.5px] text-rose-500"
+      >
+        {{ installError }}
+      </div>
+      <div
+        v-else-if="installOk"
+        class="mt-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-[10.5px] text-emerald-600 dark:text-emerald-400"
+      >
+        {{ $t('插件已安装') }}：{{ installOk }}
+      </div>
+      <div v-else class="umi-hint mt-2">
+        {{ $t('支持 GitHub 仓库地址（自动读取仓库根目录的 plugin.json / manifest.json）或任意 https 直链（.js / 清单 JSON）；仅 https、5 MB 以内；下载内容不执行，只写入插件目录。') }}
+      </div>
+    </div>
+
     <!-- 插件与沙箱：页头（说明 + 刷新）与沙箱四项指标合成一张卡 -->
     <div class="umi-card p-4" data-test="plugin-head">
       <div class="umi-card-title">
@@ -292,7 +306,7 @@ const marketCount = computed(() => market.value.length)
       </div>
 
       <div class="umi-hint mt-2">
-        {{ $t('插件跑在受限沙箱里，只提供解析器扩展；安装来源为内容寻址市场（按 sha256 校验）。沙箱限制单个插件的内存与单次脚本执行时间，超限即被中止，不会拖垮主程序。') }}
+        {{ $t('插件跑在受限沙箱里，只提供解析器扩展；可从GitHub 地址 / https 直链安装（只落盘不执行）。沙箱限制单个插件的内存与单次脚本执行时间，超限即被中止，不会拖垮主程序。') }}
       </div>
 
       <div v-if="!inTauri" class="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
@@ -392,61 +406,6 @@ const marketCount = computed(() => market.value.length)
       </div>
     </div>
 
-    <!-- 插件市场 -->
-    <div class="umi-card p-4" data-test="plugin-market">
-      <div class="umi-card-title">
-        <NIcon :size="14" :component="CloudDownloadOutline" class="text-accent" />{{ $t('插件市场') }}
-        <span class="s-surface-2 s-text-3 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums">{{ marketCount }}</span>
-      </div>
-
-      <div class="space-y-2">
-        <div
-          v-for="m in market"
-          :key="m.id"
-          class="umi-inner"
-        >
-          <div class="flex items-start gap-2.5">
-            <NIcon :size="16" :component="SparklesOutline" class="mt-[1px] shrink-0 text-accent" />
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span class="s-text text-[12.5px] font-medium">{{ m.name || m.id }}</span>
-                <span v-if="m.version" class="umi-chip !text-[10px]">v{{ m.version }}</span>
-                <span v-if="m.size" class="s-text-3 text-[10px]">{{ formatBytes(m.size) }}</span>
-              </div>
-              <div v-if="m.description" class="s-text-3 mt-0.5 text-[10.5px] leading-relaxed">{{ m.description }}</div>
-              <div class="s-text-3 mt-1 break-all font-mono text-[10px]" :title="m.sha256">sha256 {{ m.sha256 || '--' }}</div>
-
-              <div
-                v-if="verify[m.id]"
-                class="mt-2 inline-flex flex-wrap items-center gap-x-2 rounded-lg border px-2.5 py-1.5 text-[10.5px]"
-                :class="verify[m.id].ok ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-rose-500/25 bg-rose-500/10 text-rose-500'"
-              >
-                <NIcon :size="12" :component="verify[m.id].ok ? CheckmarkCircleOutline : AlertCircleOutline" />
-                <span>{{ verify[m.id].ok ? $t('校验通过：与市场摘要一致') : $t('校验不一致：摘要与市场不一致') }}</span>
-                <span class="break-all font-mono">{{ shortSha(verify[m.id].sha256) }}</span>
-              </div>
-            </div>
-
-            <button
-              class="umi-btn-primary umi-btn-sm shrink-0"
-              :disabled="busy === `install:${m.id}`"
-              @click="install(m)"
-            >
-              {{ busy === `install:${m.id}` ? $t('安装中…') : $t('安装') }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="!marketCount" class="s-text-3 flex items-center gap-2 py-6 text-[11.5px]">
-          <NIcon :size="14" :component="InformationCircleOutline" />{{ $t('市场暂无可用插件') }}
-        </div>
-      </div>
-
-      <div v-if="loading" class="mt-2.5 max-w-[220px]">
-        <NProgress type="line" :percentage="100" :height="3" :show-indicator="false" color="rgb(var(--umi-a500))" />
-      </div>
-    </div>
-
     <!-- 解析器与日志：试跑 + 事件日志合成一张卡 -->
     <div class="umi-card p-4" data-test="plugin-resolver">
       <div class="umi-card-title">
@@ -477,30 +436,6 @@ const marketCount = computed(() => market.value.length)
       >{{ resolverResult }}</pre>
       <div v-else class="umi-hint mt-2">
         {{ $t('解析器由已启用的插件提供，试跑只做解析、不会入队下载，结果原样展示。') }}
-      </div>
-
-      <!-- 事件日志 -->
-      <div class="umi-head mt-3 border-t s-border-soft pt-3">
-        <div class="umi-card-title !mb-0">
-          <NIcon :size="14" :component="ListOutline" class="text-accent" />{{ $t('事件日志') }}
-          <span class="s-surface-2 s-text-3 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums">{{ logs.length }}</span>
-        </div>
-        <span class="umi-spacer" />
-        <button class="umi-btn umi-btn-sm" :disabled="!logs.length" @click="logs = []">
-          <span class="flex items-center gap-1">
-            <NIcon :size="12" :component="RefreshOutline" />{{ $t('清空日志') }}</span>
-        </button>
-      </div>
-
-      <div class="umi-inner max-h-64 space-y-0.5 overflow-auto font-mono text-[10.5px]">
-        <div v-for="(l, i) in logs" :key="i" class="flex flex-wrap items-baseline gap-x-2">
-          <span class="s-text-3">{{ l.time }}</span>
-          <span :class="levelClass(l.level)">{{ l.level || 'info' }}</span>
-          <span v-if="l.id" class="s-text-3">{{ l.id }}</span>
-          <span v-if="l.event" class="s-text-3">{{ l.event }}</span>
-          <span class="s-text-2 break-all">{{ l.message }}</span>
-        </div>
-        <div v-if="!logs.length" class="s-text-3 py-3 text-center">{{ $t('暂无事件（最多保留 200 条）') }}</div>
       </div>
     </div>
   </div>

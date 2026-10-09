@@ -29,7 +29,6 @@ const REFACTORED = [
   'views/Settings.vue',
   'components/SettingsV14.vue',
   'components/SettingsPlugins.vue',
-  'components/Ed2kPanel.vue',
   'components/BatchImportPanel.vue',
   'components/TaskCard.vue',
   'components/SideBar.vue',

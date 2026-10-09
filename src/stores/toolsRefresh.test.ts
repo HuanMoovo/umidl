@@ -2,9 +2,9 @@
  * 工具刷新（refreshTools）的前端兜底超时
  *
  * 背景（实机复现过的 bug）：换工具目录后 store.refreshTools() 触发后端探活，
- * eMule 这种 GUI 程序被 `--version` 启动探测时永不退出，探活进程不返回 →
+ * 某个工具被 `--version` 启动探测时永不退出，探活进程不返回 →
  * 设置页永久停在「处理中…」，全部按钮禁用，只能 kill 客户端。
- * 后端已修（GUI 不启动探测 + 探活超时 + 总预算），前端这里再压一道保底：
+ * 后端已修（探活超时 + 总预算 + 文件核对），前端这里再压一道保底：
  * 无论后端因为什么原因不返回，界面都必须在有限时间内解锁，
  * 并且解锁用的是**上一次的结果**，不能把已装工具当成没装。
  */
@@ -34,7 +34,7 @@ const tool = (name: string, found: boolean, version: string | null): ToolStatus 
   hint: name,
 })
 
-const LAST = [tool('aria2', true, '1.37.0'), tool('emule', true, null)]
+const LAST = [tool('aria2', true, '1.37.0'), tool('poppler', true, null)]
 
 describe('商店 refreshTools —— 前端兜底超时', () => {
   beforeEach(() => {
@@ -70,7 +70,7 @@ describe('商店 refreshTools —— 前端兜底超时', () => {
   it('后端正常返回时用后端结果，且不触发超时日志', async () => {
     const store = useTaskStore()
     store.tools = LAST
-    const fresh = [tool('aria2', true, '1.37.0'), tool('emule', true, null), tool('poppler', true, '26.09.0')]
+    const fresh = [tool('aria2', true, '1.37.0'), tool('poppler', true, null), tool('pandoc', true, '3.11')]
     vi.mocked(ipc.detectTools).mockResolvedValue(fresh)
 
     const got = await store.refreshTools()

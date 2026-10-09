@@ -12,7 +12,7 @@
  */
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
-import { NIcon, NProgress, NSelect, NSwitch, NCollapse, NCollapseItem, useMessage } from 'naive-ui'
+import { NIcon, NProgress, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -32,6 +32,8 @@ import {
   CloseOutline,
 } from '@vicons/ionicons5'
 import ConvertRow from '@/components/ConvertRow.vue'
+import SettingsGroup from '@/components/SettingsGroup.vue'
+import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import {
@@ -675,7 +677,11 @@ onMounted(async () => {
             <span class="flex h-4 w-4 items-center justify-center rounded-full bg-umi-500/20 text-[10px] text-accent">1</span>
             <NIcon :size="15" :component="FilmOutline" class="text-cyan-600 dark:text-cyan-400" />{{ $t('源文件') }}
           </span>
-          <span class="s-text-3 text-[11px]">{{ $t('支持拖拽文件到窗口') }}</span>
+          <span class="flex items-center gap-2.5">
+            <span class="s-text-3 text-[11px]">{{ $t('支持拖拽文件到窗口') }}</span>
+            <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
+            <ModeSwitch />
+          </span>
         </div>
 
         <div class="flex gap-2">
@@ -886,6 +892,8 @@ onMounted(async () => {
           <span class="s-text-3 text-[10px]" data-role="current-target-group">{{ currentTargetGroup }}</span>
         </div>
 
+        <!-- 高级选项（1.10）：编码参数 / 码率 / 帧率等每任务参数默认折叠；简单模式下整体不渲染 -->
+        <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline">
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div v-if="paramKind === 'video'" data-field="video-codec">
             <label class="umi-label">{{ $t('视频编码') }}</label>
@@ -946,6 +954,37 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- 原「高级选项（更多选择）」的内容并入同一折叠区组（仅视频 / 音频目标） -->
+        <template v-if="paramKind === 'video' || paramKind === 'audio'">
+          <div class="grid grid-cols-2 gap-3 pb-1 sm:grid-cols-3">
+            <div v-if="paramKind === 'video'" data-field="video-bitrate">
+              <label class="umi-label">{{ $t('视频码率') }}</label>
+              <NSelect
+                v-model:value="videoBitrate"
+                :options="VIDEO_BITRATES.map((b) => ({ label: b === 'auto' ? $t('自动（按质量预设）') : b, value: b as string }))"
+                size="small"
+              />
+            </div>
+            <div v-if="paramKind === 'video'" data-field="fps">
+              <label class="umi-label">{{ $t('帧率') }}</label>
+              <NSelect v-model:value="fps" :options="noZero(FRAMERATES, ' fps', $t('保持原样'))" size="small" />
+            </div>
+            <div data-field="speed">
+              <label class="umi-label">{{ $t('播放速度') }}</label>
+              <NSelect v-model:value="speed" :options="speedOptions" size="small" />
+            </div>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-5">
+            <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+              <NSwitch v-model:value="hwaccel" size="small" />{{ $t('硬件加速解码') }}</label>
+            <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+              <NSwitch v-model:value="faststart" size="small" />{{ $t('网络快速起播（faststart）') }}</label>
+            <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+              <NSwitch v-model:value="removeMetadata" size="small" />{{ $t('清除元数据') }}</label>
+          </div>
+        </template>
+        </SettingsGroup>
+
         <!-- 图片目标：只留输出目录 + 说明 -->
         <div v-if="paramKind === 'image'" class="s-text-3 mt-2.5 text-[10.5px] leading-relaxed" data-field="image-note">
           {{ $t('图片格式直接输出，无需编码参数。') }}
@@ -965,43 +1004,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- 高级选项（仅视频 / 音频目标） -->
-        <div v-if="paramKind === 'video' || paramKind === 'audio'" class="s-border-soft mt-3 rounded-xl border">
-          <NCollapse arrow-placement="right">
-            <NCollapseItem>
-              <template #header>
-                <span class="s-text-2 flex items-center gap-2 text-[12px] font-medium">
-                  <NIcon :size="13" :component="OptionsOutline" />{{ $t('高级选项（更多选择）') }}</span>
-              </template>
-              <div class="grid grid-cols-2 gap-3 pb-1 sm:grid-cols-3">
-                <div v-if="paramKind === 'video'" data-field="video-bitrate">
-                  <label class="umi-label">{{ $t('视频码率') }}</label>
-                  <NSelect
-                    v-model:value="videoBitrate"
-                    :options="VIDEO_BITRATES.map((b) => ({ label: b === 'auto' ? $t('自动（按质量预设）') : b, value: b as string }))"
-                    size="small"
-                  />
-                </div>
-                <div v-if="paramKind === 'video'" data-field="fps">
-                  <label class="umi-label">{{ $t('帧率') }}</label>
-                  <NSelect v-model:value="fps" :options="noZero(FRAMERATES, ' fps', $t('保持原样'))" size="small" />
-                </div>
-                <div data-field="speed">
-                  <label class="umi-label">{{ $t('播放速度') }}</label>
-                  <NSelect v-model:value="speed" :options="speedOptions" size="small" />
-                </div>
-              </div>
-              <div class="mt-3 flex flex-wrap items-center gap-5">
-                <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
-                  <NSwitch v-model:value="hwaccel" size="small" />{{ $t('硬件加速解码') }}</label>
-                <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
-                  <NSwitch v-model:value="faststart" size="small" />{{ $t('网络快速起播（faststart）') }}</label>
-                <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
-                  <NSwitch v-model:value="removeMetadata" size="small" />{{ $t('清除元数据') }}</label>
-              </div>
-            </NCollapseItem>
-          </NCollapse>
-        </div>
+        <!-- 原「高级选项（更多选择）」的折叠卡已并入上方同一区组（1.10） -->
 
         <div class="mt-3.5 flex items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-5">

@@ -75,8 +75,6 @@ pub struct ToolPaths {
     pub pandoc: Option<PathBuf>,
     /// pdftotext / pdftoppm：PDF 处理引擎（受管目录 bin/poppler 下）
     pub poppler: Option<PathBuf>,
-    /// eMule：ED2K 引擎（受管目录 bin/emule 下）
-    pub emule: Option<PathBuf>,
 }
 
 impl ToolPaths {
@@ -269,7 +267,6 @@ impl Default for LineBuffer {
 /* ==================== 受管引擎残留清扫（BUG-03） ==================== */
 
 /// 受管的「瞬时」引擎：应用退出后不应该继续留在系统里。
-/// eMule 不在其列 —— 它是用户可见、可长期驻留的引擎（设置页会显示它的运行状态）。
 pub const SWEEP_ENGINES: [&str; 5] =
     ["aria2c.exe", "yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "whisper-cli.exe"];
 
@@ -361,7 +358,6 @@ mod fix18_tests {
         for name in SWEEP_ENGINES {
             assert!(s.contains(&format!("'{name}'")), "缺少 {name}：{s}");
         }
-        assert!(!s.to_lowercase().contains("emule"), "eMule 是用户可见引擎，不参与启动清扫");
         assert!(s.contains("ParentProcessId"), "必须按父进程是否存活判断孤儿");
         assert!(s.contains("Stop-Process -Id"), "要真的结束进程");
         assert!(s.contains("C:/Users/user/AppData/Roaming/umi-downloader/bin"));

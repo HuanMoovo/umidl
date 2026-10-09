@@ -85,8 +85,6 @@ const STATUS_MAP: Record<TaskStatus, { label: string; color: string; icon: any }
   extracting: { label: tr('提取音频'), color: 'text-cyan-600 dark:text-cyan-400', icon: RefreshOutline },
   transcribing: { label: tr('AI 识别中'), color: 'text-pink-600 dark:text-pink-400', icon: RefreshOutline },
   done: { label: tr('已完成'), color: 'text-emerald-600 dark:text-emerald-400', icon: CheckmarkCircleOutline },
-  // ED2K：交给 eMule 引擎接管 —— 不再显示「完成 / 100%」（进度在引擎窗口看）
-  handed_off: { label: tr('已交给引擎'), color: 'text-sky-600 dark:text-sky-400', icon: CheckmarkCircleOutline },
   error: { label: tr('失败'), color: 'text-rose-600 dark:text-rose-400', icon: AlertCircleOutline },
   canceled: { label: tr('已取消'), color: 's-text-3', icon: CloseCircleOutline },
 }
@@ -215,8 +213,8 @@ const previewable = computed(() => props.canPreview !== false)
           </div>
         </div>
 
-        <!-- 进度（已交给外部引擎的任务没有本机进度，不显示进度条以免误读成 0%） -->
-        <div v-if="status !== 'error' && status !== 'handed_off'" class="mt-2.5">
+        <!-- 进度 -->
+        <div v-if="status !== 'error'" class="mt-2.5">
           <NProgress
             type="line"
             :percentage="pct"

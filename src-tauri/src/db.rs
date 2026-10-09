@@ -180,8 +180,8 @@ impl Db {
     pub fn clear_downloads(&self, done_only: bool) -> anyhow::Result<usize> {
         let conn = self.lock();
         let sql = if done_only {
-            // handed_off（已交给 eMule 引擎）同样是「终态」，一并清掉
-            "DELETE FROM downloads WHERE status IN ('done','error','canceled','handed_off')"
+            // 「清理已完成」只删终态行
+            "DELETE FROM downloads WHERE status IN ('done','error','canceled')"
         } else {
             "DELETE FROM downloads"
         };

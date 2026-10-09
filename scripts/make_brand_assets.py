@@ -1,125 +1,153 @@
 # -*- coding: utf-8 -*-
-"""从母版生成品牌位图资产：抠出猫 → 重建底板（圆形 / 圆角方形）→ 按各尺寸导出。
+"""品牌资产管线（下载箭头）：母版 SVG → 渲染 PNG/WebP → 重生成应用图标。
 
-母版 = assets/icon-cat.png（平涂蓝底 + 猫）。脚本会按色键把蓝底（含旧底板）抠掉，
-只留猫，再在同一位置贴一块新形状的底板 —— 因此形状可以来回切换而猫的位置与比例不变
-（底板边长取猫的 bbox 外接方，圆形 = 该方的内切圆 = 最早的「圆底猫」）。
+设计：圆形底板 = 蓝紫渐变 + 顶部光泽，图形 = 白色下载箭头（竖杆 + 箭头 + 托盘线）。
+渲染走 Edge/Chrome headless（与 WebView2 同引擎），2× 超采样后按圆形 alpha 蒙版
+导出透明 PNG —— 因此不依赖 rsvg / sharp 等图形库。
 
 输出：
-  assets/icon-cat.png            1024  母版级 PNG（README / 矢量化源）
-  assets/logo-cat-256.png         256  PNG
-  assets/logo-cat-128.png         128  PNG
-  src/assets/icon-cat-512.webp    512  应用内设置页预览
-  src/assets/logo-cat-256.webp    256  应用内侧栏 LOGO
-  src/assets/logo-cat-128.webp    128  应用内小尺寸
+  assets/icon.svg          母版（可编辑矢量源）
+  assets/icon-1024.png     应用图标源图（tauri icon 输入）
+  assets/logo-1024.png     1024 PNG
+  assets/logo-256.png      256  PNG
+  assets/logo-128.png      128  PNG
+  src/assets/logo-256.webp 应用内侧栏 LOGO
+  src/assets/icon-512.webp 应用内设置页预览
 
 用法：
-  python scripts/make_brand_assets.py                    # 圆形（当前品牌）
-  python scripts/make_brand_assets.py --shape rounded --radius 0.225
+  python scripts/make_brand_assets.py            # 资产 + 应用图标
+  python scripts/make_brand_assets.py --no-icons # 只出资产
+  EDGE_BIN=<浏览器路径> 可显式指定渲染器
 """
 import argparse
 import os
+import re
+import shutil
+import subprocess
 import sys
-
-from PIL import Image, ImageDraw
-
-try:
-    import numpy as np
-except ImportError:  # 纯 Python 回退
-    np = None
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "assets", "icon-cat.png")
-BG = (122, 204, 253)          # 实测平涂底色
-T0, T1 = 10, 42               # 色键软过渡区间（切比雪夫距离）
-SS = 4                        # 形状超采样倍数
+
+# 半径 238/512 = 0.4648，圆心 256,256 —— 所有尺寸按此裁圆
+R_RATIO = 238.0 / 512.0
+SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" \
+role="img" aria-label="Umidl">
+  <title>Umidl</title>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#63C8FF"/>
+      <stop offset="0.55" stop-color="#6E8BFF"/>
+      <stop offset="1" stop-color="#8B5CFF"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="238" fill="url(#plate)"/>
+  <circle cx="256" cy="212" r="196" fill="#FFFFFF" opacity="0.10"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 132 V296"/>
+    <path d="M176 226 L256 306 L336 226"/>
+    <path d="M158 380 H354"/>
+  </g>
+</svg>
+"""
 
 OUTS = [
-    ("assets/icon-cat.png", 1024, "PNG"),
-    ("assets/logo-cat-256.png", 256, "PNG"),
-    ("assets/logo-cat-128.png", 128, "PNG"),
-    ("src/assets/icon-cat-512.webp", 512, "WEBP"),
-    ("src/assets/logo-cat-256.webp", 256, "WEBP"),
-    ("src/assets/logo-cat-128.webp", 128, "WEBP"),
+    ("assets/logo-256.png", 256),
+    ("assets/logo-128.png", 128),
+    ("src/assets/logo-256.webp", 256),
+    ("src/assets/icon-512.webp", 512),
 ]
 
 
-def key_out_cat(img: Image.Image) -> Image.Image:
-    """把平涂蓝底抠成透明，返回只剩猫的 RGBA。"""
-    img = img.convert("RGBA")
-    if np is not None:
-        a = np.asarray(img).astype(np.int16)
-        r, g, b, al = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
-        dist = np.maximum(np.maximum(np.abs(r - BG[0]), np.abs(g - BG[1])), np.abs(b - BG[2]))
-        t = np.clip((dist - T0) / float(T1 - T0), 0.0, 1.0)
-        out = a.copy()
-        out[..., 3] = (al * t).astype(np.int16)
-        return Image.fromarray(out.astype(np.uint8), "RGBA")
-    px = img.load()
-    w, h = img.size
-    out = Image.new("RGBA", (w, h))
-    q = out.load()
-    for y in range(h):
-        for x in range(w):
-            r, g, b, al = px[x, y]
-            d = max(abs(r - BG[0]), abs(g - BG[1]), abs(b - BG[2]))
-            t = 0.0 if d <= T0 else (1.0 if d >= T1 else (d - T0) / (T1 - T0))
-            q[x, y] = (r, g, b, int(al * t))
-    return out
+def find_browser() -> str:
+    env = os.environ.get("EDGE_BIN")
+    cands = [env] if env else []
+    cands += [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    raise SystemExit("找不到 Edge/Chrome，请用 EDGE_BIN=<路径> 指定渲染器")
 
 
-def plate(size: int, shape: str, radius_ratio: float, color=BG) -> Image.Image:
-    """同色底板（超采样后缩小，边缘平滑）。shape=circle 时半径取一半 → 正圆。"""
-    big = Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
-    d = ImageDraw.Draw(big)
-    box = [0, 0, size * SS - 1, size * SS - 1]
-    if shape == "circle":
-        d.ellipse(box, fill=color + (255,))
-    else:
-        d.rounded_rectangle(box, radius=radius_ratio * size * SS, fill=color + (255,))
-    return big.resize((size, size), Image.LANCZOS)
+def render(browser: str, svg_path: str, size: int, out_png: str, tmp: str) -> None:
+    """把 SVG 渲染成 size×size 的透明 PNG：2× 截图 → 圆形 alpha 蒙版 → LANCZOS 缩小。"""
+    from PIL import Image, ImageDraw, ImageFilter
 
-
-def build(src_path: str, shape: str, radius_ratio: float) -> Image.Image:
-    src = Image.open(src_path).convert("RGBA")
-    w, h = src.size
-    x0, y0, x1, y1 = src.getchannel("A").getbbox()
-    side = max(x1 - x0, y1 - y0)
-    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    canvas.alpha_composite(plate(side, shape, radius_ratio),
-                           (int(round(cx - side / 2.0)), int(round(cy - side / 2.0))))
-    canvas.alpha_composite(key_out_cat(src))
-    return canvas
+    ss = size * 2
+    svg = open(svg_path, encoding="utf-8").read()
+    svg = re.sub(r'width="512" height="512"', f'width="{ss}" height="{ss}"', svg, count=1)
+    html = (f'<!doctype html><meta charset="utf-8"><style>html,body{{margin:0;padding:0;'
+            f'background:#fff;overflow:hidden}}svg{{display:block}}</style>{svg}')
+    hpath = os.path.join(tmp, f"_wrap_{size}.html")
+    shot = os.path.join(tmp, f"_shot_{size}.png")
+    open(hpath, "w", encoding="utf-8").write(html)
+    subprocess.run([browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                    f"--window-size={ss},{ss}", f"--screenshot={shot}",
+                    "file:///" + hpath.replace("\\", "/")],
+                   capture_output=True, text=True, timeout=180)
+    im = Image.open(shot).convert("RGBA")
+    mask = Image.new("L", (ss * 2, ss * 2), 0)
+    d = ImageDraw.Draw(mask)
+    r = int(ss * 2 * R_RATIO)
+    c = ss
+    d.ellipse((c - r, c - r, c + r, c + r), fill=255)
+    mask = mask.resize((ss, ss), Image.LANCZOS).filter(ImageFilter.GaussianBlur(ss / 680.0))
+    im.putalpha(mask)
+    if im.size != (size, size):
+        im = im.resize((size, size), Image.LANCZOS)
+    im.save(out_png, "PNG", optimize=True)
 
 
 def main() -> None:
+    from PIL import Image
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shape", choices=["circle", "rounded"], default="circle")
-    ap.add_argument("--radius", type=float, default=0.225, help="rounded 时的圆角比例")
-    ap.add_argument("--src", default=SRC)
+    ap.add_argument("--no-icons", action="store_true", help="跳过 tauri icon 重生成")
     args = ap.parse_args()
+    browser = find_browser()
 
-    base = build(args.src, args.shape, args.radius)
-    # 预览的左侧 = 本次实际读入的母版（先取，避免和输出路径重合时读到新图）
-    prev_src = Image.open(args.src).convert("RGBA").copy()
-    for rel, size, fmt in OUTS:
-        path = os.path.join(ROOT, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        img = base if base.size[0] == size else base.resize((size, size), Image.LANCZOS)
-        if fmt == "WEBP":
-            img.save(path, "WEBP", quality=90, method=6)
+    icon_svg = os.path.join(ROOT, "assets", "icon.svg")
+    os.makedirs(os.path.dirname(icon_svg), exist_ok=True)
+    open(icon_svg, "w", encoding="utf-8", newline="").write(SVG)
+    print("写出 assets/icon.svg")
+
+    tmp = tempfile.mkdtemp(prefix="umidl-brand-")
+    try:
+        render(browser, icon_svg, 1024, os.path.join(ROOT, "assets", "icon-1024.png"), tmp)
+        render(browser, icon_svg, 1024, os.path.join(ROOT, "assets", "logo-1024.png"), tmp)
+        for rel, size in OUTS:
+            path = os.path.join(ROOT, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            png = os.path.join(tmp, f"_{size}.png")
+            render(browser, icon_svg, size, png, tmp)
+            img = Image.open(png).convert("RGBA")
+            if rel.endswith(".webp"):
+                img.save(path, "WEBP", quality=85, method=6)
+            else:
+                img.save(path, "PNG", optimize=True)
+            print(f"写出 {rel:30} {size}×{size}  {os.path.getsize(path):,} B")
+        for rel in ("assets/icon-1024.png", "assets/logo-1024.png"):
+            print(f"写出 {rel:30} 1024×1024  {os.path.getsize(os.path.join(ROOT, rel)):,} B")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if not args.no_icons:
+        npx = shutil.which("npx")
+        if not npx:
+            print("⚠ 未找到 npx（Node 未安装或不在 PATH），跳过 tauri icon；可手动跑："
+                  "npx tauri icon assets/icon-1024.png")
         else:
-            img.save(path, "PNG", optimize=True)
-        print(f"写出 {rel:34} {size}×{size}  {os.path.getsize(path):,} B")
-
-    prev = Image.new("RGBA", (1024, 512), (238, 240, 246, 255))
-    prev.alpha_composite(prev_src.resize((512, 512), Image.LANCZOS), (0, 0))
-    prev.alpha_composite(base.resize((512, 512), Image.LANCZOS), (512, 0))
-    out = os.environ.get("BRAND_PREVIEW", os.path.join(ROOT, ".tmp", "brand-preview.png"))
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    prev.convert("RGB").save(out, "PNG")
-    print("预览（左=母版，右=新形状）：", out)
+            r = subprocess.run([npx, "tauri", "icon", "assets/icon-1024.png"], cwd=ROOT,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", shell=(os.name == "nt"), timeout=600)
+            print("tauri icon:", "OK" if r.returncode == 0 else f"失败 exit={r.returncode}")
+            if r.returncode != 0:
+                print((r.stderr or r.stdout or "")[:400])
 
 
 if __name__ == "__main__":

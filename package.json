@@ -1,7 +1,7 @@
 {
   "name": "umidl",
   "private": true,
-  "version": "1.8.10",
+  "version": "1.8.11",
   "type": "module",
   "description": "Umidl - 轻量化视频下载 / 转换 / AI 字幕桌面客户端",
   "license": "AGPL-3.0-only",

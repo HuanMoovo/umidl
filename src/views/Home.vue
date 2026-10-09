@@ -1,20 +1,12 @@
 <script setup lang="ts">
 /**
- * 首页（布局重构）：Hero + 概览两张卡收口。
+ * 首页（布局重构）：Hero + 概览卡收口。
  *
- *  - 原来 4 张「一卡一数字」的统计卡合并成一张概览卡里的 4 个入口格；
- *  - 原来 3 张功能卡 + 1 张亮点卡合并进同一张概览卡（功能格）；亮点行已按需求移除；
- *  - 数字不再是死数据：每格都跳到对应页面，与侧边栏形成同一套入口。
+ *  - 统计卡：下载 / 转换 / 字幕 / 进行中，每格都跳到对应页面，与侧边栏形成同一套入口。
  */
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NIcon } from 'naive-ui'
-import {
-  CloudDownloadOutline,
-  SwapHorizontalOutline,
-  ChatbubblesOutline,
-} from '@vicons/ionicons5'
 import { useTaskStore } from '@/stores/tasks'
 import { looksLikeUrl } from '@/services/utils'
 import { supportedSites } from '@/services/downloader'
@@ -30,31 +22,6 @@ const stats = computed(() => [
   { key: 'converter', to: '/converter', label: tr('转换任务'), value: store.converts.length, hue: 'text-cyan-600 dark:text-cyan-300' },
   { key: 'subtitle', to: '/subtitle', label: tr('字幕任务'), value: store.subtitles.length, hue: 'text-pink-600 dark:text-pink-300' },
   { key: 'active', to: '/download', label: tr('进行中'), value: store.activeCount, hue: 'text-emerald-600 dark:text-emerald-300' },
-])
-
-/** 功能入口：与侧边栏同一批模块，用描述文字说明各自能力 */
-const features = computed(() => [
-  {
-    key: 'download',
-    to: '/download',
-    icon: CloudDownloadOutline,
-    title: tr('视频下载'),
-    desc: tr('yt-dlp 内核，支持 YouTube / Bilibili / Vimeo / TikTok 等 1000+ 站点'),
-  },
-  {
-    key: 'converter',
-    to: '/converter',
-    icon: SwapHorizontalOutline,
-    title: tr('格式转换'),
-    desc: tr('FFmpeg 全格式转码、音频提取、分辨率缩放、压缩编码'),
-  },
-  {
-    key: 'subtitle',
-    to: '/subtitle',
-    icon: ChatbubblesOutline,
-    title: tr('AI 字幕'),
-    desc: tr('Whisper 语音识别，自动生成 SRT / ASS / VTT / TXT 多语言字幕'),
-  },
 ])
 
 function go() {
@@ -105,7 +72,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 概览：统计格（可点）+ 功能入口 + 亮点，一张卡收口 -->
+    <!-- 概览：统计格（可点），一张卡收口 -->
     <section class="umi-card p-4">
       <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <button
@@ -117,24 +84,6 @@ onMounted(() => {
         >
           <div class="text-[10.5px] s-text-3">{{ s.label }}</div>
           <div class="mt-0.5 text-[20px] font-bold leading-none tabular-nums" :class="s.hue">{{ s.value }}</div>
-        </button>
-      </div>
-
-      <div class="mt-2.5 grid gap-2.5 sm:grid-cols-3">
-        <button
-          v-for="f in features"
-          :key="f.key"
-          class="umi-entry group flex items-start gap-2.5"
-          :data-test="`home-feature-${f.key}`"
-          @click="router.push(f.to)"
-        >
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border s-border s-surface-2 text-accent">
-            <NIcon :size="16" :component="f.icon" />
-          </span>
-          <span class="min-w-0">
-            <span class="block text-[12.5px] font-semibold s-text">{{ f.title }}</span>
-            <span class="mt-0.5 block text-[10.5px] leading-relaxed s-text-3">{{ f.desc }}</span>
-          </span>
         </button>
       </div>
     </section>

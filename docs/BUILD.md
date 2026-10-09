@@ -1,16 +1,16 @@
 # Umidl 多平台构建指南
 
-> 版本：1.8.10 ｜ 适用范围：Tauri 2 + Rust + Vue 3 的 Umidl 桌面客户端
+> 版本：1.8.11 ｜ 适用范围：Tauri 2 + Rust + Vue 3 的 Umidl 桌面客户端
 > 本文档只描述**怎么构建、产物在哪、验证到什么程度**。功能说明见 `README.md`，路线图见 `docs/ROADMAP.md`。
 
 ## 0. 平台状态总览（务必先看这张表）
 
 | 平台 | 产物 | 状态 | 验证方式 |
 |------|------|------|----------|
-| **Windows x64** | `Umidl_1.8.10_x64-setup.exe`（NSIS 安装包） | ✅ **本机真编 + 真机回归**（安装、启动、捕获接口实测） | 本机 Windows 11 + MSVC 工具链，**4,844,965 B（4.62 MiB）** |
-| **Linux x64** | `Umidl_1.8.10_amd64.deb` + `Umidl_1.8.10_amd64.AppImage` | ✅ **CI 真编通过并已发布**；本机 Docker 单测全绿 | GitHub Actions `ubuntu-22.04`；Docker `ubuntu:22.04` 跑 `cargo test --lib` → 230 passed / 0 failed |
-| **macOS arm64** | `Umidl_1.8.10_aarch64.dmg` | ✅ **CI 真编通过并已发布**（未在真机回归） | GitHub Actions `macos-latest`（体积见 Release 资产） |
-| **macOS x64 (Intel)** | `Umidl_1.8.10_x64.dmg` | ✅ **CI 交叉编译通过并已发布**（未在真机回归） | `macos-latest`（arm64）上 `--target x86_64-apple-darwin`（体积见 Release 资产）；**不再依赖稀缺的 `macos-13` runner** |
+| **Windows x64** | `Umidl_1.8.11_x64-setup.exe`（NSIS 安装包） | ✅ **本机真编 + 真机回归**（安装、启动实测） | 本机 Windows 11 + MSVC 工具链，**4,681,233 B（4.46 MiB）** |
+| **Linux x64** | `Umidl_1.8.11_amd64.deb` + `Umidl_1.8.11_amd64.AppImage` | ✅ **CI 真编通过并已发布**；本机 Docker 单测全绿 | GitHub Actions `ubuntu-22.04`；Docker `ubuntu:22.04` 跑 `cargo test --lib` → 230 passed / 0 failed |
+| **macOS arm64** | `Umidl_1.8.11_aarch64.dmg` | ✅ **CI 真编通过并已发布**（未在真机回归） | GitHub Actions `macos-latest`（体积见 Release 资产） |
+| **macOS x64 (Intel)** | `Umidl_1.8.11_x64.dmg` | ✅ **CI 交叉编译通过并已发布**（未在真机回归） | `macos-latest`（arm64）上 `--target x86_64-apple-darwin`（体积见 Release 资产）；**不再依赖稀缺的 `macos-13` runner** |
 | **Android aarch64** | `.apk` | ⚠️ **实验性作业**（`continue-on-error`），本机无 JDK/SDK/NDK，且**需要移动端适配**（见 §4.4） | GitHub Actions `android` job：当前失败，不阻塞发布 |
 
 一句话结论：**Windows 是“真的编过 + 真机跑过”；macOS（arm64 / Intel）与 Linux 是“CI 真的编出来了”，但未在对应真机回归；Android 仍是实验性。**
@@ -245,7 +245,7 @@ npx tauri android build --apk --target aarch64 --debug
 
 ### 5.1 全平台 CI 运行记录
 
-**1.8.10（2026-10-01）**：四平台全绿 —— [run 36847765626](https://github.com/HuanMoovo/umidl/actions/runs/36847765626)（历史快照已重建）；Windows x64 / Linux x64 / macOS arm64 / macOS x64(Intel 交叉编译) 均 success，Android 实验性作业仍为 failure（`rquickjs-sys` 移动端未适配，`continue-on-error` 不阻塞）。本版把 LOGO 换回圆形；各平台产物体积见 [Release v1.8.10](https://github.com/HuanMoovo/umidl/releases/tag/v1.8.10)。
+**1.8.10（2026-10-01）**：四平台全绿 —— [run 36847765626](https://github.com/HuanMoovo/umidl/actions/runs/36847765626)（历史快照已重建）；Windows x64 / Linux x64 / macOS arm64 / macOS x64(Intel 交叉编译) 均 success，Android 实验性作业仍为 failure（`rquickjs-sys` 移动端未适配，`continue-on-error` 不阻塞）。本版把 LOGO 换回圆形；各平台产物体积见 [Release v1.8.10](https://github.com/HuanMoovo/umidl/releases/tag/v1.8.11)。
 
 **1.8.9（2026-10-01）**：四平台全绿 —— [run 36836686644](https://github.com/HuanMoovo/umidl/actions/runs/36836686644)（历史快照已重建）；Windows x64 / Linux x64 / macOS arm64 / macOS x64(Intel 交叉编译) 均 success，Android 实验性作业仍为 failure（`rquickjs-sys` 移动端未适配，`continue-on-error` 不阻塞）。各平台的 CI 出包流程与本版一致（历史 Release 已随隐私清理一并移除）。
 
@@ -289,6 +289,4 @@ console.log(p.version, c.version, t, p.version===c.version && c.version===t ? 'O
 | 容器内 `npm ci` 失败 / 原生模块报错 | 把宿主机 `node_modules` 拷进去了 | 用脚本的 tar 排除逻辑，容器内重装 |
 | `tauri android init` 报找不到 NDK | `NDK_HOME` 未导出 | `export NDK_HOME=$ANDROID_HOME/ndk/<版本>` |
 | macOS 产物无法打开（“已损坏”） | 未签名 / 未公证 | 右键 → 打开，或后续接入 codesign + notarize |
-| **macOS 上捕获接口每个请求都回 408** | BSD 系的 `accept` 让新连接**继承监听套接字的非阻塞标志**（Linux 不继承），`read_line` 立刻拿到 `EAGAIN`，被当成“读超时” | accept 之后显式 `stream.set_nonblocking(false)`（`capture.rs`）；读超时仍由 `SO_RCVTIMEO` 兜底 |
 | **Linux/macOS 上 `run_capture` 超时后拖满全程才返回**（实测 400 ms 超时、5.01 s 返回） | 只杀直接子进程时，`sh -c "sleep 5"` 的孙进程继续持有 stdout/stderr 管道写端，读线程要等它自然退出才 EOF | 子进程以 `process_group(0)` 起，超时按进程组 `kill(-pgid, SIGKILL)`，与 Windows 的 `taskkill /T` 对齐（`tools.rs::kill_tree`） |
-| **macOS 上“端口没变却报端口被占用”** | 端口刚释放时立即 `bind` 可能短暂 `EADDRINUSE` | `capture::start` 做有界重试（最多 2 秒），确实被占用时仍如实报错 |

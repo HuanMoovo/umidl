@@ -18,7 +18,6 @@ UMI_DATA_DIR=<scratch>/umidata  UMI_DOWNLOAD_DIR=<scratch>/umidata/downloads \
 WEBVIEW2_USER_DATA_FOLDER=<scratch>/wv2profile \
 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 \
 %LOCALAPPDATA%/Umidl/umidl.exe
-# settings.json 内 capture_port=6973（避开他人占用的 6970）
 ```
 CDP 用 Node 22 内置 `WebSocket` 直连 `http://127.0.0.1:9223/json/list`；
 命令调用走页面内 `window.__TAURI_INTERNALS__.invoke`（应用未开 `withGlobalTauri`，`window.__TAURI__` 不存在）。
@@ -34,15 +33,11 @@ CDP 用 Node 22 内置 `WebSocket` 直连 `http://127.0.0.1:9223/json/list`；
 | BUG-03 | P2 | 退出应用不回收引擎子进程（无退出清理路径），aria2c/yt-dlp/ffmpeg 变孤儿进程继续跑 | `lib.rs` 全文无 `RunEvent/ExitRequested/on_exit` | 真机复现（杀掉实例后 4 个孤儿 aria2c） |
 | BUG-04 | P2 | 取消下载最终显示为“已暂停”（Canceled 被覆盖），且残留 `.aria2`/半成品文件 | `lib.rs:771` 覆盖 `lib.rs:897` | 真机复现（状态 + 磁盘） |
 | BUG-05 | P2 | `concurrency`（任务并发数）设置**完全不生效**，无排队、无上限 | `lib.rs:553`（空 `if` 块） | 真机复现（3 并发设置 → 6 个 aria2c 同时跑） |
-| BUG-06 | P2 | 捕获接口默认无令牌 + `ACAO: *` → 任意网站可指纹识别并越站入队（drive-by 下载） | `capture.rs:208`、`capture.rs:151-160` | 真机复现（带 `Origin: https://evil.example` 的 GET 成功入队） |
 | BUG-07 | P2 | 粘贴 100 万行 → 主线程阻塞 **10.0 s**（粘贴路径无长度保护，文件导入路径有 400 KB 上限） | `BatchImportPanel.vue` + `lib.rs:492` | 真机测量（rAF 计时） |
 | BUG-08 | P2 | 目标路径 >260 字符直接下载失败，且 UI 只显示无关的 “Download aborted” | `downloader.rs`/`lib.rs` 错误摘取 | 真机复现（app + 手工 aria2c 对照） |
 | BUG-09 | P2（条件性） | `extract_audio` 只 pipe 不读 stderr；实测长运行（t≈720 s）出现“输出冻结 + 进程存活 + 输入健康”，读 stderr 的对照组正常完成（详见 §10） | `subtitle.rs:214-283`（pipe 于 243-244，等待循环 253-266） | 真机复现（4 组对照 + 管道容量/速率实测） |
 | BUG-10 | P3 | 限速器 `Mutex::lock().unwrap()` 5 处，锁中毒即 panic | `ratelimit.rs:90,103,108,117,121` | 静态审查 |
-| BUG-11 | P3 | 捕获端口被占用时只写日志，UI 无提示（需用户自己进设置页看状态） | `lib.rs:1414` | 真机日志（双开实例） |
-| BUG-12 | P3 | `/capture` 无论是否真的入队/是否被过滤，都回 `{"ok":true,"queued":true}` | `capture.rs:231` | 静态审查 + 真机响应 |
 | BUG-13 | P3 | 字幕失败后仍把 `<stem>.<语言>.srt` 留在视频目录，任务里无任何指向 | `subtitle.rs:528` | 真机复现（磁盘） |
-| BUG-14 | P3 | ED2K 任务入库即 `done` + `progress=0` + `file_path=NULL`，队列显示“完成”具误导性 | `lib.rs` ED2K 分支 | 真机 DB 快照 |
 
 “已验证为正常”的清单见 §12；未能验证/结论受限的项见 §13。
 
@@ -150,7 +145,7 @@ app looks for                     = <tmp>\clip12s.srt    (exists=false)
 15340 ppid=15312 ORPHAN dir=--dir
 24676 ppid=15312 ORPHAN dir=--dir
 ```
-（4 个孤儿 `aria2c.exe`；同机还观察到先前会话遗留的 `emule.exe` 亦为孤儿。）
+（4 个孤儿 `aria2c.exe`。）
 结合 BUG-02，实际后果是：退出后引擎仍会写入磁盘；下次启动 `reset_stale_downloads()`（`lib.rs:1401`）
 把库里任务改成“暂停”，但**孤儿进程并不会被回收**，用户看到的是“已暂停”却有后台进程在跑。
 
@@ -202,39 +197,6 @@ if !s.is_running(&req.url) && s.running_count() as i64 >= s.settings_snapshot().
 
 **修复建议**：实现真正的排队（超出并发的任务置 `Pending/Queued`，完成回调里唤醒下一个），
 或把该设置项明确标注为“仅控制引擎分段”并改名，避免误导。
-
----
-
-## 7. BUG-06（P2）捕获接口默认无令牌 → 任意网站可指纹识别并“越站入队”
-
-**位置**：`capture.rs:208`（`if !token.is_empty() && …`：令牌为空时**不做任何校验**）；
-`capture.rs:151-160`（响应固定 `Access-Control-Allow-Origin: *`）；默认 `capture_token` 为空（`settings.json` 实测）
-
-**复现步骤（真机，隔离实例 6973）**
-```bash
-curl -i -H "Origin: https://evil.example" http://127.0.0.1:6973/ping
-curl -i -H "Origin: https://evil.example" \
-  "http://127.0.0.1:6973/capture?url=http%3A%2F%2F127.0.0.1%3A9%2Fdriveby.bin&source=web"
-```
-**原始输出（真机）**
-```
-HTTP/1.1 200 OK
-Access-Control-Allow-Origin: *
-{"ok":true,"app":"Umidl","version":"1.7.0","capture":true}
-
-HTTP/1.1 200 OK
-{"ok":true,"queued":true}
-```
-落库证据（隔离库）：
-```
-('99ac22e4', 'http://127.0.0.1:9/driveby.bin', 'downloading', ..., None)
-app 日志：[capture] 捕获链接：http://127.0.0.1:9/driveby.bin（来源 web）
-```
-`GET /capture` 是 CORS “简单请求”，无需预检即可被任意站点触发；`/ping` 带 `ACAO:*`，可被任意站点读取
-→ 任何网页都能探测用户是否装了 Umidl、并让客户端去下载指定链接（配合默认 `capture_auto_queue=true` 直接开始下载）。
-
-**修复建议**：默认生成随机 `capture_token` 并在首启写入设置；令牌非空时**强制**校验；
-响应去掉 `Access-Control-Allow-Origin: *`（或仅在带令牌时回 ACAO）；必要时校验 `Origin/Referer` 或要求自定义头触发预检。
 
 ---
 
@@ -338,16 +300,9 @@ B: STILL ALIVE after 180s -> ffmpeg BLOCKED on the undrained stderr pipe   # 不
 
 - **BUG-10 限速器锁 unwrap**：`ratelimit.rs:90,103,108,117,121` 使用 `self.inner.lock().unwrap()`。仅在持锁线程
   panic 后（锁中毒）才会 panic，属于潜在崩溃路径；其余生产代码的 unwrap/expect 已确认**全部**是静态正则编译
-  （`downloader.rs:30-38`、`converter.rs:17-19`、`subtitle.rs:289`、`ed2k.rs:707`）或进程入口（`lib.rs:1534`）。
+  （`downloader.rs:30-38`、`converter.rs:17-19`、`subtitle.rs:289`）或进程入口（`lib.rs:1534`）。
   `selftest.rs` 的 4 处 unwrap 仅在 `--features selftest`（开发/CI）编译，安装包不含。
-- **BUG-11 捕获端口冲突仅写日志**：`lib.rs:1414`。双开实例真机日志：
-  `[2026-09-27 20:01:32] [capture] 捕获服务启动失败：监听 127.0.0.1:6970 失败：通常每个套接字地址… (os error 10048)`；
-  设置页确实会调 `capture_status` 显示状态（`SettingsV14.vue:333`），但主界面没有任何提示。
-- **BUG-12 `/capture` 响应不反映真实结果**：`capture.rs:231` 恒返回 `{"ok":true,"queued":true}`，
-  即使 `capture_auto_queue=false` 或被过滤规则拦截也不会区分。
 - **BUG-13 字幕失败仍留产物**：见 §2，`clip12s.zh.srt` 留在视频目录，任务记录里没有任何指向。
-- **BUG-14 ED2K 任务语义**：真机 DB 快照 `('beea9adc','umi-verify-v15.bin', 'done', progress='0.0', file_path=NULL, format_note='ED2K · 已交由引擎接管')`
-  → 队列里显示“完成/100%”，实际只是把链接交给了 eMule。
 
 ---
 
@@ -360,10 +315,10 @@ B: STILL ALIVE after 180s -> ffmpeg BLOCKED on the undrained stderr pipe   # 不
    （en/fr/ja/zh）：21 个带参 key，**0 处缺参、0 处缺 key**（`i18n_check.py`）。
 4. **路由/控制台**：真机遍历 `#/ → #/download → #/converter → #/subtitle → #/settings → #/plugins`，
    无 `console.error/warn`、无 `window.onerror`、无 unhandledrejection；每页 DOM 196-884 节点。
-5. **前端无定时器/监听器泄漏**：全仓 `setInterval` 为 0；`setTimeout`（Ed2kPanel 400ms、SettingsV14、Download.vue）
+5. **前端无定时器/监听器泄漏**：全仓 `setInterval` 为 0；`setTimeout`（SettingsV14、Download.vue）
    均在 `clearTimeout`/`onBeforeUnmount` 里清理；`ParticleBg` 的 rAF 与 resize/visibilitychange 监听在卸载时注销；
    `theme.ts` 的 `matchMedia` 返回 disposer，`App.vue:96-99` 卸载时调用；`stores/tasks.ts` 的 6 个事件订阅
-   （download/convert/subtitle/selftest/tool 进度）与 `CaptureWatcher.vue` 的 `capture://url` 订阅：
+   （download/convert/subtitle/selftest/tool 进度）：
    `bootstrap()` 有 `ready` + 在飞 Promise 双重幂等保护（`tasks.ts:47-49`），各视图守卫 `if (!store.ready)`，
    真机日志只出现一次“bootstrap 明细”，**未观察到重复订阅**（订阅随应用生命周期存活，不随路由重建）。
 6. **子进程回收（下载/转换/识别路径）**：`run_download`/`run_aria2`/`run_convert`/`run_whisper` 均为
@@ -378,10 +333,6 @@ B: STILL ALIVE after 180s -> ffmpeg BLOCKED on the undrained stderr pipe   # 不
     后端 `enqueue_links` 的 `count >= 200` 截断与前端的展示一致 —— 属**已披露**行为，不计为 bug。
 12. **锁未跨 await**：`ratelimit::acquire` 先同步取令牌再 `sleep().await`（guard 已释放）；
     `lib.rs` 中 `settings`/`running`/`pids` 的 `lock()` 均为短作用域取值，未发现跨 await 持锁。
-13. **捕获服务端口/令牌机制**：默认监听 127.0.0.1；设置 `capture_token` 非空时 `/capture` 会校验
-    `X-Umidl-Token`（代码路径 + 单测 `capture.rs` 的解析用例）；端口占用时不会崩溃（见 BUG-11）。
-14. **ED2K 引擎状态探测**：真机下载页显示“运行中 · Web 4711 · emule 已在运行，可直接接管链接”，
-    与受管 `bin/emule/emule.exe` 进程一致；未提交 ed2k 链接（避免影响其它实例共享的 eMule 引擎）。
 
 ---
 
@@ -394,13 +345,12 @@ B: STILL ALIVE after 180s -> ffmpeg BLOCKED on the undrained stderr pipe   # 不
    （`umidl.exe` 消失、无 WER/事件日志崩溃记录），**无法归因于粘贴**；可确定的只有干净环境下的 10.03 s 阻塞。
 3. **应用“正常关闭窗口”是否回收子进程**：代码中未发现任何退出清理路径（grep 无 `RunEvent/ExitRequested/on_exit`），
    但实测用的是强制结束（BUG-03 结论对强制结束成立，正常关闭未实测）。
-4. **设置 `capture_token` 后的越站防护**：未实测（需要另建配置实例）。
-5. **磁盘写满 / 无写权限**：未测试（未制造磁盘满场景）；仅静态看到 `ensure_dir` 失败在 `ctx.rs:54` 被 `let _ =` 吞掉。
-6. **`yt-dlp` 下载主路径 / 站点解析**：本轮未跑真实外网下载（环境的网络与用例未覆盖），
+4. **磁盘写满 / 无写权限**：未测试（未制造磁盘满场景）；仅静态看到 `ensure_dir` 失败在 `ctx.rs:54` 被 `let _ =` 吞掉。
+5. **`yt-dlp` 下载主路径 / 站点解析**：本轮未跑真实外网下载（环境的网络与用例未覆盖），
    仅验证了 aria2 分支与受管工具可用性。
-7. **`docs.rs`/`plugins.rs` 的 unwrap 全部位于 `#[cfg(test)]` 之后**（首处 `#[cfg(test)]`：`docs.rs:2046`、
+6. **`docs.rs`/`plugins.rs` 的 unwrap 全部位于 `#[cfg(test)]` 之后**（首处 `#[cfg(test)]`：`docs.rs:2046`、
    `plugins.rs` 同类），未在运行路径发现。
-8. **双开实例共享同一 `umi.db`**：观察到 2 个实例同时运行（20:01），但未做并发写入压力测试。
+7. **双开实例共享同一 `umi.db`**：观察到 2 个实例同时运行（20:01），但未做并发写入压力测试。
 
 ---
 

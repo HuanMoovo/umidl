@@ -86,8 +86,8 @@ describe('dropById / dropWhere —— 后端删了，界面就得跟着少一行
     expect(empty.length).toBe(0)
   })
 
-  it('终态口径与后端 clear_downloads("done") 一致：done/error/canceled/handed_off', () => {
-    expect([...FINISHED_DOWNLOAD_STATUSES]).toEqual(['done', 'error', 'canceled', 'handed_off'])
+  it('终态口径与后端 clear_downloads("done") 一致：done/error/canceled', () => {
+    expect([...FINISHED_DOWNLOAD_STATUSES]).toEqual(['done', 'error', 'canceled'])
     for (const s of FINISHED_DOWNLOAD_STATUSES) expect(isFinishedDownload(t('x', s)), s).toBe(true)
     for (const s of ['pending', 'parsing', 'downloading', 'paused', 'converting', 'extracting', 'transcribing']) {
       expect(isFinishedDownload(t('x', s)), s).toBe(false)

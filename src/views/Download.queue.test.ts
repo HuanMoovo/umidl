@@ -69,7 +69,7 @@ function installInvokeStub() {
     clear_downloads: (args: any) => {
       if (clearError) throw new Error(clearError)
       // 与后端 db.rs 同口径：done 只删终态行
-      if (args?.which === 'done') downloadsMock = downloadsMock.filter((t) => !['done', 'error', 'canceled', 'handed_off'].includes(t.status))
+      if (args?.which === 'done') downloadsMock = downloadsMock.filter((t) => !['done', 'error', 'canceled'].includes(t.status))
       else downloadsMock = []
       return null
     },

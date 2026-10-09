@@ -106,14 +106,13 @@ describe('dropTask —— 后端删掉哪条，store 就摘哪条', () => {
 })
 
 describe('dropDownloads —— 清理已完成 / 清空队列', () => {
-  it("'done'：只摘终态行（done/error/canceled/handed_off），进行中的留下", () => {
+  it("'done'：只摘终态行（done/error/canceled），进行中的留下", () => {
     const store = useTaskStore()
     store.downloads = [
       dl('d1', 'done'),
       dl('d2', 'downloading'),
       dl('d3', 'error'),
       dl('d4', 'canceled'),
-      dl('d5', 'handed_off'),
       dl('d6', 'paused'),
       dl('d7', 'pending'),
     ]

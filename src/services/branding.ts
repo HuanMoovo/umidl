@@ -1,7 +1,7 @@
 /**
  * 品牌 LOGO
  *
- * 默认使用内置图（assets/logo-cat-256.webp 猫头标记 / assets/icon-cat-512.webp 完整大图）；
+ * 默认使用内置图（assets/logo-256.webp 圆形标记 / assets/icon-512.webp 完整大图）；
  * 用户在「设置 → 外观 → 自定义 LOGO」里可以换成自己的图片：后端把图片复制到
  * %APPDATA%/umi-downloader/branding/ 并写入 settings.json，这里只保存路径，
  * 并通过 asset 协议转成 WebView 能加载的 URL。
@@ -11,8 +11,8 @@
  */
 import { computed, ref } from 'vue'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import defaultMark from '@/assets/logo-cat-256.webp'
-import defaultLogo from '@/assets/icon-cat-512.webp'
+import defaultMark from '@/assets/logo-256.webp'
+import defaultLogo from '@/assets/icon-512.webp'
 import { isTauri } from '@/services/ipc'
 
 const customPath = ref('')

@@ -3,12 +3,11 @@
  * 下载页（布局重构）
  *
  * 结构：一张「链接输入」卡（含解析结果与全部下载参数）+ 队列。
- *  - 批量导入 / ED2K 引擎两个次级入口默认折叠成卡内一行按钮（原来各占一整张卡，
+ *  - 批量导入次级入口默认折叠成卡内一行按钮（原来占一整张卡，
  *    把队列挤到首屏之外）；点开后在同一位置展开，控件与调用一字未改。
- *  - 链接被判为 ed2k 时自动展开 ED2K 面板（原来链接提示与面板是分开的两块）。
  */
 import { useI18n } from 'vue-i18n'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NIcon, NSelect, NSwitch, NSpin, NModal, useMessage, useDialog } from 'naive-ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -27,17 +26,17 @@ import {
   EyeOutline,
   PlayOutline,
   CalendarOutline,
-  GitNetworkOutline,
   ListCircleOutline,
+  OptionsOutline,
 } from '@vicons/ionicons5'
 import TaskTable from '@/components/TaskTable.vue'
 import BatchImportPanel from '@/components/BatchImportPanel.vue'
-import Ed2kPanel from '@/components/Ed2kPanel.vue'
+import SettingsGroup from '@/components/SettingsGroup.vue'
+import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import { downloader } from '@/services/downloader'
 import * as ipc from '@/services/ipc'
-import { explainRoute, looksLikeEd2k } from '@/services/ed2k'
 import {
   describeMedia,
   formatBytes,
@@ -74,59 +73,14 @@ const busy = ref('')
 const previewOpen = ref(false)
 const subLangs = ref<string[]>([])
 
-/** 次级入口折叠状态：批量导入 / ED2K 引擎（默认收起，保持首屏只有输入 + 队列） */
+/** 次级入口折叠状态：批量导入（默认收起，保持首屏只有输入 + 队列） */
 const showBatch = ref(false)
-const showEd2k = ref(false)
 
-/* ------------------------- 链接类型提示（ed2k → eMule 引擎接管）------------------------- */
-/**
- * 粘入链接时问一次 explain_route：只有 engine === 'ed2k' 才提示「将由 eMule 引擎接管」，
- * 普通 http(s) / 磁力链接保持安静。输入防抖 400ms，且只在真的像链接时才打后端。
- */
-const ed2kRouted = ref(false)
-let routeTimer: ReturnType<typeof setTimeout> | undefined
-
-/** 值得问后端的链接（http(s) / ftp / 磁力 / ed2k） */
-function looksRoutable(u: string): boolean {
-  return /^(https?:\/\/|ftp:\/\/|magnet:|ed2k:)\S+$/i.test(u)
-}
-
-async function detectRoute(target: string) {
-  if (!ipc.isTauri()) return
-  try {
-    const v = await explainRoute(target)
-    // 结果回来时输入框可能已经变了：过期结果直接丢弃
-    if (url.value.trim() !== target) return
-    ed2kRouted.value = v?.engine === 'ed2k'
-  } catch {
-    ed2kRouted.value = false
-  }
-}
-
-watch(url, (v) => {
-  ed2kRouted.value = false
-  if (routeTimer) clearTimeout(routeTimer)
-  const s = String(v || '').trim()
-  if (!looksRoutable(s)) return
-  routeTimer = setTimeout(() => void detectRoute(s), 400)
-})
-
-/** 判定归 eMule 引擎的链接：自动展开 ED2K 面板（否则保持界面安静） */
-watch(ed2kRouted, (v) => {
-  if (v) showEd2k.value = true
-})
-
-/** 主按钮文案：ed2k 直接交引擎，其余仍是解析 */
-const primaryBusy = computed(() => (ed2kRouted.value ? submitting.value : probing.value))
-const primaryLabel = computed(() => {
-  if (ed2kRouted.value) return submitting.value ? tr('提交中…') : tr('交给引擎下载')
-  return probing.value ? tr('解析中…') : tr('解析')
-})
-
-/** 主按钮：ed2k 走引擎接管（后端 start_download 会路由到 eMule），其余走解析 */
+/** 主按钮：解析（解析中显示 spinner） */
+const primaryBusy = computed(() => probing.value)
+const primaryLabel = computed(() => (probing.value ? tr('解析中…') : tr('解析')))
 function primaryAction() {
-  if (looksLikeEd2k(url.value)) void start()
-  else void probe()
+  void probe()
 }
 
 /* ------------------------- 下载队列：固定「详细列表」一种布局 ------------------------- */
@@ -181,7 +135,6 @@ const STATUS_LABEL: Record<string, string> = {
   error: tr('失败'),
   canceled: tr('已取消'),
   canceled_partial: tr('部分完成'),
-  handed_off: tr('已交给引擎'),
 }
 
 function statusLabel(s: string) {
@@ -225,11 +178,6 @@ const bestFormatBytes = computed(() => {
 })
 
 async function probe() {
-  // ed2k 链接不走 yt-dlp 解析：直接交给引擎接管（后端 start_download 会路由到 eMule）
-  if (looksLikeEd2k(url.value)) {
-    await start()
-    return
-  }
   if (!looksLikeUrl(url.value)) {
     message.warning(tr('请输入完整的视频链接'))
     return
@@ -255,7 +203,6 @@ async function probe() {
 
 async function start() {
   if (!url.value.trim()) return
-  const ed2k = looksLikeEd2k(url.value)
   submitting.value = true
   try {
     const t = await downloader.start({
@@ -270,8 +217,7 @@ async function start() {
       titleHint: info.value?.title ?? null,
       thumbnailUrl: info.value?.thumbnail ?? null,
     })
-    // ed2k：任务由后端交给 eMule 引擎接管，进度在引擎窗口看
-    message.success(ed2k ? tr('已交给引擎接管，进度在引擎窗口查看') : tr('已加入下载队列'))
+    message.success(tr('已加入下载队列'))
     store.enqueueDownload(t)
   } catch (e: any) {
     message.error(String(e?.message ?? e))
@@ -421,10 +367,6 @@ onMounted(async () => {
     void probe()
   }
 })
-
-onBeforeUnmount(() => {
-  if (routeTimer) clearTimeout(routeTimer)
-})
 </script>
 
 <template>
@@ -433,12 +375,15 @@ onBeforeUnmount(() => {
     <section class="umi-card p-4">
       <div class="umi-card-title">
         <NIcon :size="14" :component="LinkOutline" class="text-accent" />{{ $t('视频链接') }}
+        <span class="umi-spacer" />
+        <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
+        <ModeSwitch />
       </div>
       <div class="flex gap-2">
         <input
           v-model="url"
           class="umi-input flex-1"
-          placeholder="https://www.youtube.com/watch?v=... / https://www.bilibili.com/video/BV... / ed2k://|file|..."
+          placeholder="https://www.youtube.com/watch?v=... / https://www.bilibili.com/video/BV..."
           spellcheck="false"
           data-test="link-input"
           @keyup.enter="primaryAction"
@@ -446,20 +391,10 @@ onBeforeUnmount(() => {
         <button class="umi-btn-primary whitespace-nowrap" :disabled="primaryBusy" data-test="link-primary" @click="primaryAction">
           <span class="flex items-center gap-1.5">
             <NSpin v-if="primaryBusy" :size="12" />
-            <NIcon v-else :size="14" :component="ed2kRouted ? GitNetworkOutline : SearchOutline" />
+            <NIcon v-else :size="14" :component="SearchOutline" />
             {{ primaryLabel }}
           </span>
         </button>
-      </div>
-
-      <!-- 链接类型提示：只有后端判定「归 eMule 引擎」的链接才提示，普通链接不打扰 -->
-      <div
-        v-if="ed2kRouted"
-        class="mt-2 flex items-center gap-2 rounded-xl border border-umi-500/25 bg-umi-500/10 px-3 py-1.5 text-[11.5px]"
-        data-test="ed2k-hint"
-      >
-        <NIcon :size="14" :component="GitNetworkOutline" class="text-accent shrink-0" />
-        <span class="s-text">{{ $t('检测到 ED2K 链接 · 将由 eMule 引擎接管') }}</span>
       </div>
 
       <!-- 解析结果 -->
@@ -516,8 +451,9 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 主下载参数 -->
-        <div class="mt-3 grid grid-cols-2 gap-3">
+        <!-- 高级选项（1.10）：每任务参数默认折叠；简单模式下整体不渲染 -->
+        <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3">
+        <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="umi-label">{{ $t('下载模式') }}</label>
             <div class="flex gap-1.5">
@@ -553,6 +489,14 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
+        <!-- 每任务开关（原底部一行，随参数收进同一折叠区组） -->
+        <div class="mt-3 flex flex-wrap items-center gap-4">
+          <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+            <NSwitch v-model:value="embedThumb" size="small" />{{ $t('嵌入封面') }}</label>
+          <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+            <NSwitch v-model:value="embedSubs" size="small" />{{ $t('嵌入字幕') }}</label>
+        </div>
+        </SettingsGroup>
 
         <!-- 单独下载 -->
         <div class="mt-3">
@@ -601,13 +545,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-4">
-            <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
-              <NSwitch v-model:value="embedThumb" size="small" />{{ $t('嵌入封面') }}</label>
-            <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
-              <NSwitch v-model:value="embedSubs" size="small" />{{ $t('嵌入字幕') }}</label>
-          </div>
+        <div class="mt-3 flex flex-wrap items-center justify-end gap-3">
           <button class="umi-btn-primary" :disabled="submitting" data-test="link-start" @click="start">
             <span class="flex items-center gap-1.5">
               <NIcon :size="14" :component="CloudDownloadOutline" />{{ $t('开始下载') }}</span>
@@ -630,27 +568,12 @@ onBeforeUnmount(() => {
         >
           <span class="flex items-center gap-1"><NIcon :size="12" :component="ListCircleOutline" />{{ $t('批量导入') }}</span>
         </button>
-        <button
-          class="umi-btn umi-btn-sm"
-          :class="showEd2k ? 'chip-active' : ''"
-          :aria-expanded="showEd2k"
-          data-test="toggle-ed2k"
-          @click="showEd2k = !showEd2k"
-        >
-          <span class="flex items-center gap-1"><NIcon :size="12" :component="GitNetworkOutline" />{{ $t('ED2K 电驴引擎') }}</span>
-        </button>
-        <span class="umi-hint">{{ $t('多链接批量入队 / eMule 引擎接管') }}</span>
       </div>
     </section>
 
     <!-- 批量导入（1.6）：多链接 / txt 一次性入队（默认折叠） -->
     <section v-if="showBatch" class="umi-card p-4" data-test="batch-slot">
       <BatchImportPanel bare />
-    </section>
-
-    <!-- ED2K 电驴引擎：链接由上方主输入框传入，面板不放第二个输入框 -->
-    <section v-if="showEd2k" class="umi-card p-4" data-test="ed2k-slot">
-      <Ed2kPanel bare compact :link="url" />
     </section>
 
     <!-- 任务队列 -->

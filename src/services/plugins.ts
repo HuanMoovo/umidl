@@ -1,5 +1,5 @@
 /**
- * 插件系统（1.4 新增）：沙箱信息 / 已装插件 / 内容寻址市场 / 事件日志 的薄封装。
+ * 插件系统（1.4 新增）：沙箱信息 / 已装插件 / 内容寻址市场 / 从 URL 安装 / 事件日志 的薄封装。
  *
  * 命令名由后端固定；plugin://event 与 plugin://installed 采用宽松 payload 解析。
  * 非 Tauri 环境（浏览器预览）一律抛出可读错误，由页面用 isTauri() 守卫降级。
@@ -76,6 +76,11 @@ export async function pluginMarketList(): Promise<PluginMarketEntry[]> {
   return Array.isArray(res?.plugins) ? res.plugins : []
 }
 export const pluginInstall = (id: string) => call<unknown>('plugin_install', { id })
+/**
+ * 从 GitHub 仓库 / https 直链安装插件（后端负责：仅 https、≤ 5 MB、超时 60 s、
+ * 只写入现有插件目录、下载内容不执行；错误信息为可读中文，直接展示即可）。
+ */
+export const pluginInstallFromUrl = (url: string) => call<PluginInfo>('plugin_install_from_url', { url })
 export const pluginUninstall = (id: string) => call<unknown>('plugin_uninstall', { id })
 export const pluginSetEnabled = (id: string, enabled: boolean) =>
   call<unknown>('plugin_set_enabled', { id, enabled })

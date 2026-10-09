@@ -20,8 +20,6 @@ export default {
 
   "AAC / M4A · 苹果生态": "AAC / M4A · Écosystème Apple",
 
-  "AI 字幕": "Sous-titres IA",
-
   "AI 识别中": "Reconnaissance IA en cours",
 
   "Base · 142MB · 均衡": "Base · 142MB · Équilibré",
@@ -30,17 +28,8 @@ export default {
 
   "Cookies 文件（用于会员 / 受限内容）": "Fichier Cookies (pour contenu membres / restreint)",
 
-  "ED2K 电驴引擎": "Moteur ED2K (eDonkey)",
-
-  "ED2K 解析预览": "Aperçu de l'analyse ED2K",
-
-  "FFmpeg 全格式转码、音频提取、分辨率缩放、压缩编码": "Transcodage tous formats FFmpeg, extraction audio, mise à l'échelle de la résolution, encodage compressé",
-
   "FLAC · 无损音质": "FLAC · Qualité sans perte",
 
-  "GET /ping 可握手自检；POST /capture（body 为 url=<链接>&referer=<来源>）同样支持；仅监听本机回环地址。": "GET /ping sert d'auto-test de poignée de main ; POST /capture (corps url=<lien>&referer=<source>) est également pris en charge ; l'écoute se fait uniquement sur l'adresse de boucle locale.",
-
-  "HLS / DASH 分片并发下载数（1-16，默认 1）": "Téléchargements simultanés de fragments HLS / DASH (1-16, défaut 1)",
 
   "HLS / DASH 片段，1-16，默认 1": "Segments HLS / DASH, 1-16, défaut 1",
 
@@ -52,7 +41,6 @@ export default {
 
   "OPUS · 体积最小": "OPUS · Fichier le plus léger",
 
-  "PDF / Office / 电子书": "PDF / Office / livres numériques",
 
   "Small · 466MB · 推荐": "Small · 466MB · Recommandé",
 
@@ -62,19 +50,14 @@ export default {
   "Large v3 · 3.1GB · 最高精度": "Large v3 · 3,1GB · Précision maximale",
 
 
-  "Vue 挂载完成，开始加载设置": "Vue monté, chargement des paramètres",
 
   "WAV · 未压缩": "WAV · Non compressé",
 
   "Whisper 模型": "Modèle Whisper",
 
-  "Whisper 语音模型": "Modèle vocal Whisper",
-
-  "Whisper 语音识别，自动生成 SRT / ASS / VTT / TXT 多语言字幕": "Reconnaissance vocale Whisper, génération automatique de sous-titres multilingues SRT / ASS / VTT / TXT",
 
   "aria2 · 分段并行引擎": "aria2 · Moteur parallèle segmenté",
 
-  "aria2 分段引擎安装完成": "Moteur segmenté aria2 installé",
 
   "aria2 分段引擎已就绪": "Moteur segmenté aria2 prêt",
 
@@ -88,15 +71,10 @@ export default {
 
   "copy（不重编码）": "copy (sans réencodage)",
 
-  "eMule 引擎安装完成": "Moteur eMule installé",
-
-  "filePath ? '点击预览' : '点击查看封面'": "filePath ? 'Cliquer pour prévisualiser' : 'Cliquer pour voir la miniature'",
 
   "px 原图": "px, image d'origine",
 
   "yt-dlp · 站点解析引擎": "yt-dlp · Moteur d'analyse de sites",
-
-  "yt-dlp 内核，支持 YouTube / Bilibili / Vimeo / TikTok 等 1000+ 站点": "Moteur yt-dlp, compatible avec YouTube / Bilibili / Vimeo / TikTok et plus de 1000 sites",
 
   "yt-dlp 分片并发": "Concurrence des fragments yt-dlp",
 
@@ -116,7 +94,6 @@ export default {
 
   "{n} 个视频": "{n} vidéos",
 
-  "{n} 项不可用（置灰）": "{n} indisponible(s) (grisé)",
 
   "{n}/{total} 种": "{n}/{total} types",
 
@@ -124,11 +101,9 @@ export default {
 
   "{n}亿": "{n}×100 millions",
 
-  "· 自动": "· Auto",
 
   "→ 英文": "→ anglais",
 
-  "一键安装": "Installation en un clic",
 
   "下载": "Télécharger",
 
@@ -158,7 +133,6 @@ export default {
 
   "不可用": "Indisponible",
 
-  "不可用的格式已置灰（悬停可见原因）；选中即作为转换任务的目标格式，视频 / 音频目标才显示下方编码参数。": "Les formats indisponibles sont grisés (survolez pour voir pourquoi) ; la sélection devient le format cible de la conversion, et les réglages d'encodage ci-dessous ne s'affichent que pour une cible vidéo / audio.",
 
   "个": "tâches",
 
@@ -166,19 +140,12 @@ export default {
 
   "中（推荐）": "Moyenne (recommandée)",
 
-  "为什么选择 Umidl": "Pourquoi choisir Umidl",
 
   "主要按钮": "Bouton principal",
 
   "主题与强调色": "Thème et couleur d'accent",
 
-  "主题（昼夜模式）": "Thème (mode jour/nuit)",
 
-  "事件日志": "Journal d'événements",
-
-  "交给引擎下载": "Confier au moteur",
-
-  "交给引擎失败：": "Échec de la remise au moteur :",
 
   "仅删除记录": "Supprimer uniquement l'enregistrement",
 
@@ -196,15 +163,12 @@ export default {
 
   "代理服务器": "Serveur proxy",
 
-  "令牌桶算法，即改即生效（对 yt-dlp 与 aria2 同时生效）；0 或关闭 = 不限速。": "Algorithme du seau à jetons, effet immédiat (vaut pour yt-dlp et aria2) ; 0 ou désactivé = aucune limite.",
 
   "令牌桶算法，即改即生效（对 yt-dlp 与 aria2 同时生效）；0 或关闭 = 不限速。范围 64 KB/s – 100 MB/s。": "Limiteur à jetons, appliqué immédiatement à yt-dlp et aria2 ; 0 ou désactivé = illimité. Plage 64 KB/s – 100 MB/s.",
 
-  "以上格式来自后端能力表；转换时按扩展名自动路由到文档引擎，不再走 ffmpeg。": "Ces formats proviennent de la table de capacités du backend ; la conversion est routée par extension vers le moteur de documents au lieu de ffmpeg.",
 
   "任务": "Tâche",
 
-  "任务数据 + 工具检测完成，隐藏加载遮罩": "Données des tâches + détection des outils terminées, masquage de l'écran de chargement",
 
   "任务预览": "Aperçu de la tâche",
 
@@ -216,13 +180,10 @@ export default {
 
   "低（省电，粒子最少）": "Faible (économie d'énergie, le moins de particules)",
 
-  "使用": "Utiliser",
 
-  "使用中": "Utilisé",
 
   "依赖就绪": "Dépendances prêtes",
 
-  "依赖工具": "Outils requis",
 
   "依赖工具状态": "État des outils requis",
 
@@ -234,19 +195,14 @@ export default {
 
   "保存": "Enregistrer",
 
-  "保存并重启捕获": "Enregistrer et redémarrer la capture",
-
   "保持原样": "Tel quel",
 
   "保留原始文件": "Conserver le fichier d'origine",
 
-  "全局限速": "Limite de débit globale",
 
   "全选": "Tout sélectionner",
 
   "全部": "Tout",
-
-  "全部任务完成后关机": "Éteindre une fois toutes les tâches terminées",
 
   "全部加入队列": "Tout ajouter à la file",
 
@@ -256,19 +212,14 @@ export default {
 
   "共 {n} 种格式": "{n} formats au total",
 
-  "关闭则只在界面提示": "Désactivé : simple notification dans l'interface",
-
   "内存上限": "Limite de mémoire",
 
   "内置": "Intégré",
-
-  "再次点击确认关机": "Cliquez à nouveau pour confirmer",
 
   "准备中…": "Préparation…",
 
   "分P / 合集模式": "Mode multi-parties / playlist",
 
-  "分片小于 1 MB 时 aria2 会拒启（1-64，默认 1）": "aria2 refuse de démarrer si un segment fait moins de 1 MB (1-64, défaut 1)",
 
   "分辨率": "Résolution",
 
@@ -276,9 +227,7 @@ export default {
 
   "列表已刷新": "Liste actualisée",
 
-  "初始化数据失败": "Échec de l'initialisation des données",
 
-  "删除": "Supprimer",
 
   "删除任务": "Supprimer la tâche",
 
@@ -290,8 +239,6 @@ export default {
 
   "刷新列表": "Actualiser la liste",
 
-  "刷新状态": "Actualiser l'état",
-
   "剩余 {t}": "{t} restant",
 
   "加入中…": "Ajout…",
@@ -300,13 +247,10 @@ export default {
 
   "加载中…": "Chargement…",
 
-  "动画与性能": "Animations et performances",
 
   "动画质量": "Qualité des animations",
 
-  "单个文件切成多少段并行下载（1-16，默认 16）": "Nombre de segments par fichier téléchargés en parallèle (1-16, défaut 16)",
 
-  "单个服务器最多同时连接数（1-16，默认 16）": "Connexions simultanées maximales par serveur (1-16, défaut 16)",
 
   "单个视频（分P 只取当前一集）": "Vidéo unique (multi-parties : uniquement l'épisode courant)",
 
@@ -316,7 +260,6 @@ export default {
 
   "单独下载": "Téléchargement séparé",
 
-  "卡片模式": "Mode cartes",
 
   "印地语": "Hindi",
 
@@ -336,8 +279,6 @@ export default {
 
   "取消": "Annuler",
 
-  "取消已计划的关机": "Annuler l'extinction programmée",
-
   "受管工具（yt-dlp / ffmpeg / whisper 等）安装在这里；解析与调用只认这个目录，不改系统 PATH。": "Les outils gérés (yt-dlp / ffmpeg / whisper…) sont installés ici ; la résolution et les appels utilisent uniquement ce répertoire, sans modifier le PATH système.",
 
   "只选未装": "Manquants uniquement",
@@ -348,19 +289,13 @@ export default {
 
   "同时下载任务数": "Téléchargements simultanés",
 
-  "同时下载数": "Téléchargements simultanés",
 
   "同时删除文件": "Supprimer aussi les fichiers",
 
-  "同时进行的下载任务上限（1-8，默认 3）": "Nombre maximal de téléchargements simultanés (1-8, défaut 3)",
 
   "启动时检查更新": "Vérifier les mises à jour au démarrage",
 
   "启用全局限速": "Activer la limite de débit globale",
-
-  "命中过滤规则": "Correspond à une règle de filtrage",
-
-  "命中黑名单、不在白名单或体积不足的文件会被拦下（「链接体验」会实时提示）。磁力与 ed2k 链接不受扩展名 / 域名规则限制。": "Les fichiers en liste noire, absents de la liste blanche ou trop petits sont bloqués (le vérificateur de lien l'affiche en direct). Les liens magnet et ed2k échappent aux règles d'extension / de domaine.",
 
   "品牌与动画": "Image de marque et animation",
 
@@ -374,27 +309,14 @@ export default {
 
   "在浏览器打开": "Ouvrir dans le navigateur",
 
-  "域名白名单（非空时只允许名单内域名）": "Liste blanche de domaines (si non vide, seuls les domaines listés sont autorisés)",
-
-  "域名黑名单": "Liste noire de domaines",
-
   "声道": "Canaux",
 
   "处理中…": "Traitement…",
 
-  "复制示例链接": "Copier le lien d'exemple",
-
   "外观": "Apparence",
 
-  "外部引擎": "Moteurs externes",
 
-  "多条用英文逗号分隔；域名支持通配符 *.example.com。": "Séparez plusieurs entrées par des virgules ; les domaines acceptent les jokers comme *.example.com.",
 
-  "多条用英文逗号分隔；域名支持通配符 *.example.com。命中黑名单、不在白名单或体积不足的文件会被拦下（「链接体验」会实时提示）。磁力与 ed2k 链接不受扩展名 / 域名规则限制。": "Séparez plusieurs entrées par des virgules ; les domaines acceptent les jokers du type *.example.com. Les fichiers correspondant à la liste noire, absents de la liste blanche ou trop petits sont bloqués (l'essai de lien affiche un retour en direct). Les liens magnet et ed2k ne sont pas soumis aux règles d'extension / de domaine.",
-
-  "多线程与并发": "Multithreading et concurrence",
-
-  "多链接批量入队 / eMule 引擎接管": "Ajout en lot de plusieurs liens / prise en charge par le moteur eMule",
 
   "夜间模式": "Mode nuit",
 
@@ -424,19 +346,11 @@ export default {
 
   "字符数": "Caractères",
 
-  "存储与下载": "Stockage et téléchargement",
 
   "存储与网络": "Stockage et réseau",
 
-  "安全检查：响应不含 CORS 通配头，网页（非本机 Origin / Referer）没有正确令牌会被 403 拒绝并在响应里说明原因。": "Sécurité : les réponses ne portent jamais d'en-tête CORS générique ; les requêtes de pages web (Origin / Referer non local) sans jeton valide reçoivent un 403 avec la raison.",
-
   "安装": "Installer",
 
-  "安装 aria2 分段引擎": "Installer le moteur segmenté aria2",
-
-  "安装 eMule 引擎": "Installer le moteur eMule",
-
-  "安装 eMule 引擎后，ed2k 链接可交由引擎接管下载": "Installez le moteur eMule pour lui confier les liens ed2k",
 
   "安装中…": "Installation…",
 
@@ -446,15 +360,13 @@ export default {
 
   "完成后系统通知": "Notification système à la fin",
 
-  "导入": "Importer",
 
-  "导入中…": "Importation…",
 
   "导出中…": "Exportation…",
 
   "导出日志包": "Exporter le paquet de journaux",
 
-  "导出日志包：把运行日志与环境摘要（版本 / 平台 / 工具路径 / 引擎与限速 / 过滤规则 / 捕获端口）打包到指定目录，排查问题时直接附带该文件。": "Exporter le paquet de journaux : regroupe les journaux d'exécution et le résumé de l'environnement (version / plateforme / chemins des outils / moteur et limite de débit / règles de filtrage / port de capture) dans un dossier choisi — joignez ce fichier lors d'un signalement.",
+  "导出日志包：把运行日志与环境摘要（版本 / 平台 / 工具路径 / 引擎与限速）打包到指定目录，排查问题时直接附带该文件。": "Exporter le paquet de journaux : regroupe les journaux d'exécution et le résumé de l'environnement (version / plateforme / chemins des outils / moteur et limite de débit) dans un dossier choisi — joignez ce fichier lors d'un signalement.",
 
   "导出格式": "Format d'export",
 
@@ -466,8 +378,6 @@ export default {
 
   "封面图片": "Image de couverture",
 
-  "将使用：": "Utilisera : ",
-
   "（未下载）": " (non téléchargé)",
 
   "下载模型（约 {size}）": "Télécharger le modèle (~{size})",
@@ -476,7 +386,6 @@ export default {
 
   "https://…/ggml-xxx.bin 或 GitHub 直链 / 仓库文件名 / 本地 .bin 路径": "https://…/ggml-xxx.bin, lien direct GitHub, nom de fichier du dépôt ou chemin .bin local",
 
-  "Whisper 语音模型的下载 / 自定义导入已挪到「字幕」页 —— 在模型下拉框下方即可直接下载或贴链接安装。": "Les modèles Whisper se téléchargent et s’importent désormais dans la page « Sous-titres », juste sous le sélecteur de modèle.",
 
   "工具安装目录": "Répertoire d'installation des outils",
 
@@ -492,7 +401,6 @@ export default {
 
   "已安装 {n} 个工具": "{n} outil(s) installé(s)",
 
-  "已装": "Installé",
 
   "已装 · {version}": "Installé · {version}",
 
@@ -544,9 +452,7 @@ export default {
 
   "配置的模型「{model}」尚未下载，本次将自动使用已安装的「{fallback}」。": "Le modèle configuré « {model} » n’est pas encore téléchargé ; « {fallback} » sera utilisé pour cette exécution.",
 
-  "尚未取到后端能力表（后端未提供该命令），以上为内置兜底列表。": "Table de capacités indisponible (commande non exposée par le backend) ; la liste ci-dessus est un repli intégré.",
 
-  "尚未取到后端能力表（浏览器预览），以上为内置兜底列表。": "Table de capacités indisponible (aperçu navigateur) ; la liste ci-dessus est un repli intégré.",
 
   "尚未安装 Whisper 引擎，请前往「设置 → 依赖工具」一键安装。": "Le moteur Whisper n'est pas installé. Accédez à « Paramètres → Outils requis » pour l'installer en un clic.",
 
@@ -558,12 +464,6 @@ export default {
 
   "已下载 · 占用 {size}": "Téléchargé · {size} utilisés",
 
-  "已交由引擎接管": "Remis au moteur",
-
-  "已交给引擎": "Remis au moteur",
-
-  "已交给引擎接管，进度在引擎窗口查看": "Remis au moteur — suivez la progression dans la fenêtre du moteur",
-
   "已保存": "Enregistré",
 
   "已停用": "Désactivé",
@@ -574,9 +474,8 @@ export default {
 
   "已切换到 {name}": "Basculé vers {name}",
 
-  "已删除 {name}": "{name} supprimé",
 
-  "已加入 {added} 条，拦截 {blocked} 条，跳过 {skipped} 条": "{added} ajoutés, {blocked} bloqués, {skipped} ignorés",
+  "已加入 {added} 条，跳过 {skipped} 条": "{added} ajoutés, {skipped} ignorés",
 
   "已加入{label}下载任务": "Ajouté à la file de téléchargement : {label}",
 
@@ -584,13 +483,8 @@ export default {
 
   "已取消": "Annulé",
 
-  "已取消计划的关机": "Extinction programmée annulée",
-
-  "已启动": "Démarré",
-
   "已启用": "Activé",
 
-  "已安装": "Installé",
 
   "已安装插件": "Plugins installés",
 
@@ -610,11 +504,8 @@ export default {
 
   "已开启开机自启动": "Lancement au démarrage activé",
 
-  "已开启：所有任务完成后会计划 60 秒后关机（留出取消时间）。关机期间可随时撤回。": "Activé : une fois toutes les tâches terminées, une extinction est programmée dans 60 secondes (délai d'annulation). Vous pouvez l'annuler à tout moment d'ici là.",
-
   "已开始 {n} 个转写任务": "{n} tâches de transcription lancées",
 
-  "已开始生成字幕": "Génération des sous-titres lancée",
 
   "已开始转换": "Conversion lancée",
 
@@ -634,15 +525,6 @@ export default {
 
   "已托管": "Géré",
 
-  "已把链接交给引擎接管": "Lien confié au moteur",
-
-  "已捕获并加入下载队列": "Lien capturé et ajouté à la file de téléchargement",
-
-  "已捕获链接（自动入队已关闭）": "Lien capturé (mise en file automatique désactivée)",
-
-  "已捕获链接，但被智能过滤规则拦截": "Lien capturé mais bloqué par le filtrage intelligent",
-
-  "已接管": "Pris en charge",
 
   "已是最新版本": "Déjà à jour",
 
@@ -650,19 +532,12 @@ export default {
 
   "已继续下载": "Téléchargement repris",
 
-  "已被过滤：": "Filtré : ",
-
-  "已计划 60 秒后关机，可用「取消已计划的关机」撤回": "Extinction programmée dans 60 secondes ; annulez-la avec « Annuler l'extinction programmée »",
-
   "已识别 {n} 条": "{n} détecté(s)",
 
-  "已识别为文档文件：参数由下方「文档转换」能力区决定，转换按扩展名自动路由。": "Reconnu comme document : les paramètres viennent de la section « Conversion de documents » ci-dessous et la conversion est routée par extension.",
 
   "已选": "Sélectionné",
 
   "已重新检测转换引擎与格式目录": "Moteurs de conversion et catalogue de formats redétectés",
-
-  "已重置捕获令牌（旧令牌立即失效）": "Jeton de capture régénéré (l'ancien cesse de fonctionner immédiatement)",
 
   "市场暂无可用插件": "Aucun plugin disponible sur le marché",
 
@@ -690,17 +565,11 @@ export default {
 
   "开机自启动": "Lancer au démarrage",
 
-  "开机自启动由系统计划项托管，此处状态以系统实际状态回填；关机只在全部任务成功结束时触发。": "Le lancement au démarrage est géré par une tâche planifiée du système ; l'état affiché ici reflète l'état réel du système. L'extinction n'est déclenchée que lorsque toutes les tâches se terminent avec succès.",
+  "开机自启动由系统计划项托管，此处状态以系统实际状态回填。": "Le lancement au démarrage est géré par une tâche planifiée du système ; l'état affiché ici reflète l'état réel du système.",
 
   "引擎": "Moteur",
 
   "引擎就绪": "Moteurs prêts",
-
-  "引擎已安装并运行": "Moteur installé et en cours d'exécution",
-
-  "引擎已安装，但当前没有运行": "Moteur installé mais non démarré",
-
-  "引擎已就绪": "Moteur prêt",
 
   "引擎未就绪": "Moteurs non prêts",
 
@@ -713,8 +582,6 @@ export default {
   "当前不限速": "Aucune limite de débit",
 
   "当前使用自定义 LOGO：": "Logo personnalisé utilisé : ",
-
-  "当前是浏览器预览：引擎状态与解析结果都不可用，请在桌面客户端中打开本页。": "Aperçu navigateur : l'état du moteur et l'analyse sont indisponibles — ouvrez cette page dans le client de bureau.",
 
   "当前是浏览器预览：插件数据不可用，请在桌面客户端中打开本页。": "Aperçu navigateur : les données de plugins sont indisponibles — ouvrez cette page dans le client de bureau.",
 
@@ -734,8 +601,6 @@ export default {
 
   "意大利语": "Italien",
 
-  "所有请求都必须携带令牌（自动生成）：请求头 X-Umidl-Token: <令牌>，或用同名查询参数 ?token=；浏览器扩展 / 书签脚本同样适用，清空令牌保存会自动生成新的。": "Chaque requête doit porter le jeton (généré automatiquement) : en-tête X-Umidl-Token: <jeton>, ou paramètre ?token=. Extensions et signets inclus ; enregistrer une valeur vide régénère un jeton.",
-
   "所选清晰度": "Qualité sélectionnée",
 
   "打开下载目录": "Ouvrir le dossier de téléchargement",
@@ -746,27 +611,11 @@ export default {
 
   "打开文件": "Ouvrir le fichier",
 
-  "扩展名黑名单": "Liste noire d'extensions",
-
   "批量导入": "Import en masse",
-
-  "拦截原因": "Raisons du blocage",
 
   "指定清晰度": "Qualité spécifiée",
 
   "指定路径": "Chemin spécifié",
-
-  "捕获后自动入队": "Mise en file automatique après capture",
-
-  "捕获服务启动失败": "Échec du démarrage du service de capture",
-
-  "捕获服务已关闭（端口为 0）": "Service de capture désactivé (port à 0)",
-
-  "捕获服务已监听": "Service de capture en écoute",
-
-  "捕获服务未开启": "Service de capture non démarré",
-
-  "换端口并重启": "Changer de port et redémarrer",
 
   "排队中": "En file d'attente",
 
@@ -775,8 +624,6 @@ export default {
   "接近原始画质": "Proche de la qualité d'origine",
 
   "接近原始画质（14）": "Proche de la qualité d'origine (14)",
-
-  "提交中…": "Envoi…",
 
   "提取音频": "Extraire l'audio",
 
@@ -796,9 +643,13 @@ export default {
 
   "插件管理": "Gestion des plugins",
 
-  "插件跑在受限沙箱里，只提供解析器扩展；安装来源为内容寻址市场（按 sha256 校验）。": "Les plugins s'exécutent dans un bac à sable restreint et n'étendent que les résolveurs ; les installations proviennent d'un marché adressé par contenu (vérifié par sha256).",
+  "从 GitHub 安装": "Installer depuis GitHub",
 
-  "插件跑在受限沙箱里，只提供解析器扩展；安装来源为内容寻址市场（按 sha256 校验）。沙箱限制单个插件的内存与单次脚本执行时间，超限即被中止，不会拖垮主程序。": "Les plugins s'exécutent dans un bac à sable restreint et ne fournissent que des extensions de résolveur ; l'installation provient du marché adressé par contenu (vérifié par sha256). Le bac à sable limite la mémoire et la durée d'exécution de chaque script : tout dépassement l'interrompt sans affecter l'application.",
+  "粘贴 GitHub 仓库地址（https://github.com/owner/repo）或 .js / 清单 JSON 的 https 直链": "Collez une adresse de dépôt GitHub (https://github.com/owner/repo) ou un lien direct https vers un fichier .js / manifeste JSON",
+
+  "支持 GitHub 仓库地址（自动读取仓库根目录的 plugin.json / manifest.json）或任意 https 直链（.js / 清单 JSON）；仅 https、5 MB 以内；下载内容不执行，只写入插件目录。": "Prend en charge les adresses de dépôt GitHub (lecture automatique de plugin.json / manifest.json à la racine du dépôt) ou tout lien direct https (.js / manifeste JSON) ; https uniquement, ≤ 5 Mo ; le contenu téléchargé n'est jamais exécuté et est écrit uniquement dans le répertoire des plugins.",
+
+  "插件跑在受限沙箱里，只提供解析器扩展；可从GitHub 地址 / https 直链安装（只落盘不执行）。沙箱限制单个插件的内存与单次脚本执行时间，超限即被中止，不会拖垮主程序。": "Les plugins s'exécutent dans un bac à sable restreint et ne fournissent que des extensions de résolveur ; l'installation provient du d'une adresse GitHub / lien direct https (écrit sur disque, jamais exécuté). Le bac à sable limite la mémoire de chaque plugin et la durée d'exécution d'un script : tout dépassement l'interrompt sans affecter l'application.",
 
   "搜索格式（名称 / 说明）": "Rechercher un format (nom / description)",
 
@@ -822,7 +673,6 @@ export default {
 
   "文本文件": "Fichier texte",
 
-  "文案": "Texte",
 
   "文档": "Document",
 
@@ -832,11 +682,8 @@ export default {
 
   "文档格式在上方网格选择；转换按扩展名自动路由到文档引擎，不再走 ffmpeg。": "Choisissez le format cible dans la grille ci-dessus ; la conversion est routée vers le moteur document selon l'extension, sans ffmpeg.",
 
-  "文档目标格式": "Format cible du document",
 
-  "文档转换": "Conversion de documents",
 
-  "文档转换由 Pandoc / Poppler 等外部引擎完成，未安装时点上方「安装」；转换任务与音视频共用同一个队列。": "La conversion de documents est assurée par des moteurs externes tels que Pandoc / Poppler — cliquez sur « Installer » ci-dessus s'ils manquent ; les tâches partagent la même file que l'audio/vidéo.",
 
   "无字幕": "Aucun sous-titre",
 
@@ -850,9 +697,7 @@ export default {
 
   "昼夜模式切换": "Bascule jour/nuit",
 
-  "显示 {n} 项": "{n} affiché(s)",
 
-  "智能过滤": "Filtrage intelligent",
 
   "暂停": "Pause",
 
@@ -860,17 +705,12 @@ export default {
 
   "暂无封面": "Aucune miniature",
 
-  "更新": "Mises à jour",
 
   "更新与诊断": "Mises à jour et diagnostics",
-
-  "更新清单地址（JSON，含 version / url / notes）": "URL du manifeste de mise à jour (JSON avec version / url / notes)",
 
   "最佳": "Optimal",
 
   "最佳画质": "Meilleure qualité",
-
-  "最小体积（MB，0 = 不过滤）": "Taille minimale (Mo, 0 = aucun filtrage)",
 
   "最小分片（MB）": "Taille minimale des segments (Mo)",
 
@@ -886,35 +726,20 @@ export default {
 
   "未命名任务": "Tâche sans nom",
 
-  "未安装，依赖它的格式不可选": "Non installé — les formats qui en dépendent sont indisponibles",
 
   "未安装，依赖它的格式暂不列出": "Non installé ; les formats qui en dépendent ne sont pas affichés",
 
-  "未安装，无法转换依赖它的格式": "Non installé — les formats qui en dépendent ne peuvent pas être convertis",
 
   "未检测到 aria2 分段引擎": "Moteur segmenté aria2 non détecté",
 
-  "未检测到 eMule 引擎": "Aucun moteur eMule détecté",
-
-  "未检测到引擎状态": "État du moteur indisponible",
 
   "未检测（浏览器预览）": "Non détecté (aperçu navigateur)",
 
   "未知": "Inconnu",
 
-  "仅核对文件，不启动探测（GUI 程序）": "Vérification du fichier uniquement — pas de sonde (application GUI)",
-
   "探活超时，无法确认版本": "Sonde expirée — version inconnue",
 
-  "未知文件名": "Nom de fichier inconnu",
-
   "未知错误": "Erreur inconnue",
-
-  "未运行": "Arrêté",
-
-  "本机引擎不支持": "Non pris en charge par les moteurs locaux",
-
-  "来源数": "Sources",
 
   "极速 · 体积大（18）": "Très rapide · Fichier volumineux (18)",
 
@@ -930,27 +755,18 @@ export default {
 
   "校验通过：与市场摘要一致": "Vérifié : empreinte identique au marché",
 
-  "格式转换": "Conversion de format",
-
   "检查中…": "Vérification…",
 
   "检查失败：": "Échec de la vérification : ",
 
   "检查更新": "Vérifier les mises à jour",
 
-  "检测中…": "Détection…",
-
-  "检测到 ED2K 链接 · 将由 eMule 引擎接管": "Lien ED2K détecté · le moteur eMule prend le relais",
-
-  "棱形": "Losange",
 
   "棱形（菱形）": "Losange (diamant)",
 
   "樱花粉": "Rose cerisier",
 
   "正在加载 Umidl…": "Chargement d'Umidl…",
-
-  "正在检测引擎…": "Détection du moteur…",
 
   "正在解析…": "Analyse…",
 
@@ -960,7 +776,6 @@ export default {
 
   "每个语言额外生成一份英文字幕": "Une sous-titre anglais supplémentaire est généré pour chaque langue",
 
-  "每个选中的语言各起一个转写任务": "Chaque langue sélectionnée lance sa propre tâche de transcription",
 
   "每次启动静默比对更新清单": "Comparer silencieusement le manifeste de mise à jour à chaque démarrage",
 
@@ -968,11 +783,9 @@ export default {
 
   "沙箱不可用": "Bac à sable indisponible",
 
-  "沙箱信息": "Informations du bac à sable",
 
   "沙箱可用": "Bac à sable disponible",
 
-  "沙箱限制单个插件的内存与单次脚本执行时间，超限即被中止，不会拖垮主程序。": "Le bac à sable limite la mémoire par plugin et la durée d'exécution des scripts ; tout dépassement est interrompu sans affecter l'application.",
 
   "没有匹配的格式（换个类型或清空搜索）": "Aucun format correspondant (changez de type ou effacez la recherche)",
 
@@ -992,11 +805,7 @@ export default {
 
   "测试通过": "Test réussi",
 
-  "测试：60 秒后关机": "Test : extinction dans 60 secondes",
-
   "浏览…": "Parcourir…",
-
-  "浏览器捕获": "Capture navigateur",
 
   "浏览器预览下不做文档探测": "L'analyse des documents est ignorée en aperçu navigateur",
 
@@ -1032,7 +841,6 @@ export default {
 
   "点击「应用」会写入 --umi-accent / --umi-accent-text 及 50–950 色阶（按钮、进度条、滚动条、背景光晕一起跟着变）。文字色按当前明暗主题自动取亮档或深档，浅色主题不会出现白字白底。": "Cliquer sur Appliquer écrit --umi-accent / --umi-accent-text ainsi qu'une échelle 50–950 (boutons, barres de progression, ascenseurs et halo d'arrière-plan suivent). La couleur du texte prend le palier clair ou foncé selon le thème jour / nuit actuel : en thème clair, jamais de texte blanc sur fond blanc.",
 
-  "点击右侧按钮按源文件编码自动选择最佳输出格式": "Cliquez sur le bouton à droite pour choisir automatiquement le meilleur format de sortie selon l'encodage du fichier source",
 
   "点击查看封面": "Cliquer pour voir la miniature",
 
@@ -1048,19 +856,11 @@ export default {
 
   "生成字幕": "Générer les sous-titres",
 
-  "用法：浏览器扩展 / 书签向以下地址发一个请求即可把链接推给 Umidl：": "Utilisation : une extension de navigateur / un signet peut envoyer un lien à Umidl avec une simple requête vers l'adresse ci-dessous :",
-
   "界面语言": "Langue de l'interface",
 
   "界面语言已切换": "Langue de l'interface changée",
 
-  "留空 = 不限制": "Laisser vide = illimité",
-
   "白天模式": "Mode jour",
-
-  "监听中": "En écoute",
-
-  "监听端口（0 = 关闭）": "Port d'écoute (0 = désactivé)",
 
   "目标格式": "Format cible",
 
@@ -1068,11 +868,7 @@ export default {
 
   "硬件加速解码": "Décodage matériel",
 
-  "示例已复制到剪贴板": "Exemple copié dans le presse-papiers",
-
   "立体声": "Stéréo",
-
-  "端口可能已被其它程序占用，请换一个端口后点「保存并重启捕获」。": "Le port est peut-être utilisé par un autre programme — choisissez un autre port puis cliquez sur « Enregistrer et redémarrer la capture ».",
 
   "等待中": "En attente",
 
@@ -1084,11 +880,7 @@ export default {
 
   "粒子形状": "Forme des particules",
 
-  "粘贴 ed2k 链接（即时解析）": "Collez un lien ed2k (analyse immédiate)",
-
   "粘贴视频链接，例如 https://www.bilibili.com/video/BV...": "Collez le lien de la vidéo, par exemple https://www.bilibili.com/video/BV...",
-
-  "粘贴链接，例如 https://… 或 magnet:?xt=…": "Collez un lien, par exemple https://… ou magnet:?xt=…",
 
   "粘贴链接，用已启用插件跑一遍解析器": "Collez un lien pour exécuter les résolveurs des plugins activés",
 
@@ -1096,7 +888,6 @@ export default {
 
   "系统与电源": "Système et alimentation",
 
-  "系统与集成": "Système et intégration",
 
   "紧凑任务卡片": "Cartes de tâches compactes",
 
@@ -1132,7 +923,6 @@ export default {
 
   "自定义": "Personnalisé",
 
-  "自定义 LOGO": "Logo personnalisé",
 
   "自定义 · {name}": "Personnalisé · {name}",
 
@@ -1148,8 +938,6 @@ export default {
 
   "葡萄牙语": "Portugais",
 
-  "被过滤规则拦截的链接不会入队": "Les liens bloqués par les règles de filtrage ne sont pas mis en file",
-
   "西班牙语": "Espagnol",
 
   "视频": "Vidéo",
@@ -1157,8 +945,6 @@ export default {
   "视频 / 音频文件": "Fichiers vidéo / audio",
 
   "视频 {codec}": "Vidéo {codec}",
-
-  "视频下载": "Téléchargement vidéo",
 
   "视频下载完成后会自动从画面生成封面": "Une miniature est générée automatiquement à partir de l'image après le téléchargement de la vidéo",
 
@@ -1188,23 +974,18 @@ export default {
 
   "设置": "Paramètres",
 
-  "设置加载完成": "Paramètres chargés",
-
-  "访问令牌（自动生成，必填）": "Jeton d'accès (généré automatiquement, requis)",
 
   "识别到 {n} 条链接，去重后 {m} 条": "{n} liens détectés, {m} après déduplication",
 
-  "识别语言": "Langue de reconnaissance",
 
   "识别语言（可多选）": "Langue (sélection multiple)",
+  "选择要识别的语言": "Sélectionnez les langues à reconnaître",
 
-  "诊断": "Diagnostic",
 
   "该功能需要在桌面客户端中运行": "Cette fonctionnalité nécessite l'application de bureau",
 
   "该视频没有封面图": "Cette vidéo n'a pas de miniature",
 
-  "详细列表": "Liste détaillée",
 
   "请先解析链接": "Veuillez d'abord analyser le lien",
 
@@ -1222,7 +1003,6 @@ export default {
 
   "读取文件失败": "Échec de la lecture du fichier",
 
-  "读取设置失败": "Échec de la lecture des paramètres",
 
   "质量预设": "Préréglages de qualité",
 
@@ -1252,13 +1032,7 @@ export default {
 
   "载入文件后自动检测最佳输出格式": "Détection automatique du meilleur format de sortie après le chargement du fichier",
 
-  "输入链接后自动预览：文件哈希 / 名称 / 大小 / 源数量（无需开始下载）。": "Aperçu automatique à la saisie : empreinte / nom / taille / nombre de sources (sans téléchargement).",
-
-  "输入链接后自动预览：走哪个引擎、是否被过滤规则拦下（无需开始下载）。": "Collez un lien pour un aperçu automatique : quel moteur sera utilisé et si une règle de filtrage le bloque (sans lancer le téléchargement).",
-
   "输出目录": "Dossier de sortie",
-
-  "运行中": "En cours",
 
   "运行解析器": "Exécuter les résolveurs",
 
@@ -1271,8 +1045,6 @@ export default {
   "还没有安装任何插件": "Aucun plugin installé",
 
   "还没有转换任务": "Aucune tâche de conversion",
-
-  "这不是一条 ed2k 链接（应以 ed2k:// 开头）": "Ce n'est pas un lien ed2k (il doit commencer par ed2k://)",
 
   "进度": "Progression",
 
@@ -1292,7 +1064,6 @@ export default {
 
   "选择文件或直接拖拽到窗口内…": "Sélectionnez un fichier ou glissez-le dans la fenêtre…",
 
-  "选择文档文件后显示页数 / 工作表 / 幻灯片 / 字符数。": "Sélectionnez un document pour afficher pages / feuilles / diapositives / caractères.",
 
   "选择要下载的字幕语言": "Sélectionnez les langues de sous-titres à télécharger",
 
@@ -1300,7 +1071,6 @@ export default {
 
   "通用": "Général",
 
-  "通用设置": "Paramètres généraux",
 
   "速度 / 剩余": "Vitesse / restant",
 
@@ -1310,23 +1080,9 @@ export default {
 
   "采样率": "Fréquence d'échantillonnage",
 
-  "重启中…": "Redémarrage…",
-
-  "重新启动捕获服务": "Redémarrer le service de capture",
-
   "重新检测": "Revérifier",
 
-  "重置令牌": "Régénérer le jeton",
-
   "重装": "Réinstaller",
-
-  "链接": "lien",
-
-  "链接会交给 eMule 引擎接管，进度在引擎窗口查看": "Le lien est confié au moteur eMule — suivez la progression dans la fenêtre du moteur",
-
-  "链接体验（会走哪个引擎）": "Essai de lien (moteur utilisé)",
-
-  "链接路由与过滤": "Routage et filtrage des liens",
 
   "阿拉伯语": "Arabe",
 
@@ -1366,7 +1122,6 @@ export default {
 
   "高级": "Avancé",
 
-  "高级选项（更多选择）": "Options avancées (plus de choix)",
 
   "高（粒子最多）": "Élevée (le plus de particules)",
 
@@ -1376,7 +1131,6 @@ export default {
 
   "默认分辨率": "Résolution par défaut",
 
-  "默认参数": "Paramètres par défaut",
 
   "默认启用硬件加速解码": "Activer par défaut le décodage matériel",
 
@@ -1430,5 +1184,35 @@ export default {
 
   "工具与模型下载都走这里填写的代理；留空时自动跟随系统代理（Windows 设置 → 网络和 Internet → 代理）": "Les téléchargements d'outils et de modèles utilisent le proxy saisi ici ; si le champ est vide, le proxy système est utilisé automatiquement (Paramètres Windows → Réseau et Internet → Proxy)",
 
+  "界面模式": "Mode d'interface",
+  "简单": "Simple",
+  "简单模式只显示常用项，切换高级可见全部": "Le mode Simple n'affiche que les options courantes ; passez en Avancé pour tout voir",
+  "网络与账户": "Réseau et compte",
+  "新任务默认参数": "Paramètres par défaut des nouvelles tâches",
+  "界面风格": "Style d'interface",
+  "玻璃拟态（默认）": "Glassmorphism (par défaut)",
+  "毛玻璃卡片与彩色光晕（现状）": "Cartes en verre dépoli et halos colorés (aspect actuel)",
+  "黑白简约": "Monochrome",
+  "纯黑 / 纯白背景，去模糊去彩色阴影，强调色退化为黑 / 白": "Fond noir / blanc pur, sans flou ni ombres colorées, accents réduits au noir / blanc",
+  "自定义渐变": "Dégradé personnalisé",
+  "已启用：侧栏选中项 / 主按钮 / 标题渐变": "Actif : sélection latérale / boutons principaux / dégradé du titre",
+  "起始颜色": "Couleur de début",
+  "结束颜色": "Couleur de fin",
+  "渐变预览": "Aperçu du dégradé",
+  "清除渐变": "Effacer le dégradé",
+  "两个色值都不为空时生效：侧栏选中项、主按钮与标题渐变改用这条渐变；清除后回到强调色渐变。": "Prend effet lorsque les deux couleurs sont définies : la sélection latérale, les boutons principaux et le dégradé du titre utilisent ce dégradé ; effacez-le pour revenir au dégradé d'accent.",
+  "已清除自定义渐变": "Dégradé personnalisé effacé",
+  "高级 · 限速与并发": "Avancé · limites de débit et concurrence",
+  "事件日志（调试）": "Journal d'événements (débogage)",
+  "高级选项": "Options avancées",
+  "已就绪 {ready} 项 · 缺失 {missing} 项": "{ready} prêts · {missing} manquants",
+  "管理全部工具": "Gérer tous les outils",
+  "收起全部工具": "Replier tous les outils",
+  "数据目录": "Dossier de données",
+  "主题": "Thème",
+  "强调色与渐变": "Couleur d'accent et dégradé",
+  "自定义…": "Personnalisé…",
+  "前往 GitHub 下载": "Télécharger depuis GitHub",
+  "每次启动静默检查 GitHub Releases": "Vérifier silencieusement les GitHub Releases à chaque démarrage",
+  "更新检查读取本仓库的 GitHub Releases（api.github.com）。": "La vérification des mises à jour lit les GitHub Releases de ce dépôt (api.github.com).",
 }
-

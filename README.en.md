@@ -6,13 +6,13 @@
 
 **Lightweight, good-looking, high-performance desktop client for video download / format conversion / AI subtitles**
 
-Download + convert + subtitles, all in one place. Built with **Tauri 2 + Rust + Vue 3**, installer **4.62 MiB**, and all processing happens **on your own machine** — nothing is uploaded, no account, no telemetry.
+Download + convert + subtitles, all in one place. Built with **Tauri 2 + Rust + Vue 3**, installer **4.46 MiB**, and all processing happens **on your own machine** — nothing is uploaded, no account, no telemetry.
 
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-2f81f7.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3fb950.svg)](#-platform-support)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org)
-[![Installer size](https://img.shields.io/badge/Installer-5.44%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
+[![Installer size](https://img.shields.io/badge/Installer-4.46%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
 [![i18n](https://img.shields.io/badge/i18n-%E4%B8%AD%20%C2%B7%20EN%20%C2%B7%20%E6%97%A5%20%C2%B7%20FR-8957e5.svg)](#ui-and-themes)
 
 [Quick start](#-quick-start) · [What it does](#-what-it-does) · [Features](#-features) · [Platform support](#-platform-support) · [Contributing](CONTRIBUTING.md) · [Project page](https://huanmoovo.github.io/umidl/) · [Roadmap](docs/ROADMAP.md)
@@ -20,10 +20,10 @@ Download + convert + subtitles, all in one place. Built with **Tauri 2 + Rust + 
 <sub><a href="README.md">简体中文</a> · English · <a href="README.ja.md">日本語</a></sub>
 
 <a href="https://huanmoovo.github.io/umidl/">
-  <img src="docs/img/home.webp" alt="Umidl 1.8.10 main window: link input box, four task counters and three feature entries" width="860" />
+  <img src="docs/img/home.webp" alt="Umidl 1.8.11 main window: link input box, four task counters and three feature entries" width="860" />
 </a>
 
-<sub>Umidl 1.8.10 main window (screenshot from a real Windows machine, sandboxed data directory) · <a href="https://huanmoovo.github.io/umidl/#screens">See all 7 interface screenshots</a></sub>
+<sub>Umidl 1.8.11 main window (screenshot from a real Windows machine, sandboxed data directory) · <a href="https://huanmoovo.github.io/umidl/#screens">See all 7 interface screenshots</a></sub>
 
 </div>
 
@@ -31,12 +31,12 @@ Download + convert + subtitles, all in one place. Built with **Tauri 2 + Rust + 
 
 ## 🎯 What it does
 
-**Runs the whole "download → convert → subtitles" chain on your own machine** — installer 4.62 MiB (measured on the 1.8.10 Windows NSIS build).
+**Runs the whole "download → convert → subtitles" chain on your own machine** — installer 4.46 MiB (measured on the 1.8.11 Windows NSIS build).
 
-| Capability | Status (1.8.10; verifiable from the repository and the application UI) |
+| Capability | Status (1.8.11; verifiable from the repository and the application UI) |
 | --- | --- |
 | **Local processing, nothing uploaded** | The entire pipeline runs in local processes: no account, no telemetry, no cloud parsing; uninstalling the app or deleting the data directory clears all state |
-| **Download** | Three pipelines auto-routed by link type (yt-dlp site extraction / aria2c segmented parallel / eMule ed2k); multi-part videos, collections and HLS/DASH merged automatically; pause, resume, global speed limit; triple filtering by extension / domain / minimum size |
+| **Download** | Two pipelines auto-routed by link type (yt-dlp site extraction / aria2c segmented parallel); multi-part videos, collections and HLS/DASH merged automatically; pause, resume, global speed limit |
 | **Format conversion** | 80 target formats (video 22 · audio 20 · image 20 · document 18), availability decided by probing the local engine capabilities; docx / xlsx / pptx / odt / ods / odp parsed natively in pure Rust; NVENC / QSV / AMF hardware encoding supported |
 | **Subtitles** | Whisper.cpp transcribes locally; recognition language is auto-detection plus 8 selectable languages, with an optional "translate to English" track on top; exports SRT / ASS / VTT / TXT / JSON; 6 model tiers downloaded on demand |
 | **Plugins** | QuickJS sandbox with hard caps of 16 MB memory / 512 KB stack / 200 ms per execution; allow-listed API (no `require` / `process` / `fetch`); plugins verified by content-addressed sha256 |
@@ -49,7 +49,7 @@ Download + convert + subtitles, all in one place. Built with **Tauri 2 + Rust + 
 
 ### Windows (released)
 
-1. Download `Umidl_x.y.z_x64-setup.exe` from [Releases](https://github.com/HuanMoovo/umidl/releases) (1.8.10 installer: **4.62 MiB**)
+1. Download `Umidl_x.y.z_x64-setup.exe` from [Releases](https://github.com/HuanMoovo/umidl/releases) (1.8.11 installer: **4.46 MiB**)
 2. The first launch detects runtime tools such as yt-dlp / FFmpeg / Whisper automatically; anything missing can be installed with one click under "Settings → Dependencies" (installed into `%APPDATA%/umi-downloader/bin`, **never written to the system PATH**)
 3. Paste a link → pick a quality → start the download
 
@@ -67,7 +67,7 @@ npm run tauri:dev      # dev mode (hot reload)
 npm run tauri:build    # build locally: .dmg / .AppImage / .deb
 ```
 
-- **Where CI artifacts live**: Actions → the `Release` workflow → Artifacts of the corresponding run (`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`); all four targets ship with [v1.8.10](https://github.com/HuanMoovo/umidl/releases). The Intel macOS dmg is cross-compiled on an arm64 runner (command in [CONTRIBUTING.md](CONTRIBUTING.md)).
+- **Where CI artifacts live**: Actions → the `Release` workflow → Artifacts of the corresponding run (`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`); all four targets ship with [v1.8.11](https://github.com/HuanMoovo/umidl/releases). The Intel macOS dmg is cross-compiled on an arm64 runner (command in [CONTRIBUTING.md](CONTRIBUTING.md)).
 - macOS / Linux are currently **built by CI only** and have not been through a full regression on real hardware; aria2 has no official static build on these two platforms, so the install guide points to `brew` / `apt`.
 
 ### Requirements (source builds)
@@ -83,29 +83,24 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow.
 
 | Platform | Architecture | Artifact | Status |
 | --- | --- | --- | --- |
-| Windows | x64 | NSIS installer `.exe` | ✅ **Released** (1.8.10, 4.62 MiB, regression run on real hardware) |
-| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **Released** (1.8.10, 8.96 MiB, CI-built, no on-device regression) |
-| macOS | Intel (x64) | `.dmg` | ✅ **Released** (1.8.10, 9.24 MiB, cross-compiled by CI on an arm64 runner, no on-device regression) |
-| Linux | x64 | `.AppImage` / `.deb` | ✅ **Released** (1.8.10, deb 6.85 MiB / AppImage 81.4 MiB, CI-built, no on-device regression) |
+| Windows | x64 | NSIS installer `.exe` | ✅ **Released** (1.8.11, 4.46 MiB, regression run on real hardware) |
+| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **Released** (1.8.11, 8.96 MiB, CI-built, no on-device regression) |
+| macOS | Intel (x64) | `.dmg` | ✅ **Released** (1.8.11, 9.24 MiB, cross-compiled by CI on an arm64 runner, no on-device regression) |
+| Linux | x64 | `.AppImage` / `.deb` | ✅ **Released** (1.8.11, deb 6.85 MiB / AppImage 81.4 MiB, CI-built, no on-device regression) |
 | Android | — | — | 🔴 Experimental work, needs mobile-side porting; no artifacts provided yet |
 
 ---
 
 ## ✨ Features
 
-### Download engine (three engines, auto-routed · updated in 1.5)
+### Download engine (two engines, auto-routed)
 - **aria2c segmented parallel engine**: direct links / FTP / BitTorrent torrents / magnet links use 16 dynamic connections (adjustable 1 – 16), with resume after power loss
 - **yt-dlp site extraction engine**: video from 1000+ sites, **multi-part videos and collections**, automatic HLS/DASH stream merging
-- **eMule engine (new in 1.5)**: ed2k links (one more protocol alongside HTTP/HTTPS/FTP/BT/magnet/HLS/DASH) are handed to a managed eMule engine, which parses the file name / size / hash / AICH from the link; after the handoff the engine's task list is read back for verification
-- **ED2K panel merged into the download page (updated in 1.7)**: engine status / one-click eMule engine install / instant parsing of a pasted link (hash · name · size · source count · AICH, shown collapsed) / "hand to engine for download" all live in a compact card on the download page; pasting an ed2k link into the input box immediately shows "ED2K link detected · the eMule engine will take over", and the single-link download button can also hand over to the engine directly
-- The engine can be set to "Auto / yt-dlp / aria2" in Settings; auto mode routes by link type (ed2k always goes to the eMule engine)
+- The engine can be set to "Auto / yt-dlp / aria2" in Settings; auto mode routes by link type
 - **Global speed limit (token bucket)**: set a bandwidth ceiling; gateway-level throttling applies to yt-dlp, aria2 and the app's own requests alike, so downloads running in the background do not get in the way of browsing
-- **Smart filtering**: block by file extension, domain allow/deny lists and minimum file size; blocked links are not queued and the reason is reported
-- **ED2K engine (built into the download page since 1.7)**: `ed2k://` links are handed to a managed eMule engine; the panel shows engine status, offers one-click install, instant parsing of a pasted link (file name / size / sources / AICH) and the handoff
 - **Managed ImageMagick (new in 1.8)**: targets ffmpeg cannot write (PSD/DDS) are handled by the app-managed ImageMagick, still without polluting the system PATH
-- **Multi-link / txt batch import (new in 1.6)**: paste several links at once or import a txt file, filter them by extension/domain/size and queue them in bulk; a results panel reports "added / blocked / skipped" with a reason for each entry
+- **Multi-link / txt batch import (new in 1.6)**: paste several links at once or import a txt file and queue them in bulk; a results panel reports "added / skipped" plus the failure reasons
 - **Threads and concurrency (new in 1.6)**: the number of simultaneous tasks and each download's connection count / segment count / minimum chunk size are configurable (applied separately to aria2 and yt-dlp), and out-of-range values are clamped automatically
-- **Browser capture**: local loopback endpoint `http://127.0.0.1:6970/capture?url=…`; a browser extension / bookmarklet / command line pushes links straight into the download queue (**token enforced**: `capture_token` is generated automatically on first launch, and requests must carry `X-Umidl-Token: <token>` or `?token=<token>`, viewable / resettable under "Settings › System › Browser capture"; responses carry no CORS wildcard header, so web origins (Origin / Referer not local) without the correct token are rejected with 403 and an explanation; listens on 127.0.0.1 only)
 - **Download queue**: a single table-style list (card mode removed as of V1.8.7, actions trimmed to open / reveal / preview / delete)
 
 ### Plugin sandbox (JavaScript · new in 1.5)
@@ -211,7 +206,7 @@ umi-downloader
 │   │   ├── selftest.rs  # automated self-check system
 │   │   └── http_testserver.rs # local HTTP server for self-check
 │   └── tauri.conf.json
-└── scripts/make_icon.py # generates app icons
+└── scripts/make_brand_assets.py  # brand pipeline: master SVG → PNG/WebP/app icons
 ```
 
 ---
@@ -292,7 +287,7 @@ python scripts/check_i18n_catalog.py  # four-locale key sets must match
 
 This project is open source under the **GNU Affero General Public License v3.0** (`AGPL-3.0-only`); the full text is in [LICENSE](LICENSE).
 
-In one sentence: Umidl is a purely local desktop application, but it carries a local HTTP capture endpoint and a programmable plugin sandbox — **the AGPL obliges anyone who wraps it into a network service for others to hand over the source code**, while ordinary users running it on their own computers face no additional restrictions.
+In one sentence: Umidl is a purely local desktop application, but it carries a programmable plugin sandbox — **the AGPL obliges anyone who wraps it into a network service for others to hand over the source code**, while ordinary users running it on their own computers face no additional restrictions.
 
 ### Third-party tool notices
 
@@ -303,7 +298,6 @@ Umidl itself only does the orchestration and **does not distribute** the followi
 | yt-dlp | Site extraction and video download | Unlicense (public release) |
 | FFmpeg / FFprobe | Transcoding, muxing, probing | LGPL-2.1-or-later or GPL-2.0-or-later (depending on its build configuration) |
 | aria2c | Segmented parallel download (HTTP/FTP/BT/magnet) | GPL-2.0-or-later |
-| eMule | ed2k network | GPL-2.0-or-later |
 | ImageMagick | Image formats ffmpeg cannot write, such as PSD / DDS | ImageMagick License (Apache-2.0 style) |
 | pandoc | Conversion between rich-text formats such as docx / odt / rtf / epub | GPL-2.0-or-later |
 | poppler (pdftotext) | PDF text extraction | GPL-2.0-or-later |

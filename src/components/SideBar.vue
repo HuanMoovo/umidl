@@ -61,13 +61,13 @@ const badges = computed<Record<string, number>>(() => ({
           class="group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200"
           :class="
             route.path === it.to
-              ? 'bg-gradient-to-r from-umi-600/35 to-transparent s-text shadow-[inset_0_0_0_1px_rgba(124,77,255,0.35)]'
+              ? 'umi-nav-active bg-gradient-to-r from-umi-600/35 to-transparent s-text shadow-[inset_0_0_0_1px_rgba(124,77,255,0.35)]'
               : 's-text-3 hover:s-surface-2 hover:s-text'
           "
         >
           <span
             v-if="route.path === it.to"
-            class="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-gradient-to-b from-umi-400 to-accent-cyan shadow-glow"
+            class="umi-nav-bar absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-gradient-to-b from-umi-400 to-accent-cyan shadow-glow"
           />
           <NIcon :size="18" :component="it.icon" :class="route.path === it.to ? 'text-accent' : ''" />
           <span class="font-medium">{{ it.label }}</span>
@@ -79,25 +79,6 @@ const badges = computed<Record<string, number>>(() => ({
           </span>
         </RouterLink>
       </nav>
-
-      <div class="px-4 pb-5">
-        <div class="umi-inner !px-2.5 !py-2 text-[11px] leading-relaxed s-text-3">
-          <div class="mb-0.5 flex items-center gap-1.5 s-text-2">
-            <span
-              class="h-1.5 w-1.5 rounded-full"
-              :class="
-                store.tools.length === 0
-                  ? 'animate-pulse bg-sky-400'
-                  : store.toolsReady
-                    ? 'bg-emerald-400'
-                    : 'bg-amber-400'
-              "
-            />
-            {{ store.tools.length === 0 ? $t('依赖检测中…') : store.toolsReady ? $t('依赖就绪') : $t('依赖待安装') }}
-          </div>
-          yt-dlp · FFmpeg · Whisper
-        </div>
-      </div>
     </div>
   </aside>
 </template>

@@ -465,6 +465,384 @@ pub fn install_from_market(ctx: &Ctx, id: &str) -> Result<Json> {
     Ok(public_record(&record))
 }
 
+/* ==================== 从 URL 安装（GitHub 仓库 / https 直链） ==================== */
+
+/// 远程下载体积上限（5 MB，单文件）
+pub const REMOTE_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// 远程下载超时（秒）
+pub const REMOTE_FETCH_TIMEOUT_SECS: u64 = 60;
+/// GitHub 仓库根目录的清单候选文件名（按顺序探测）
+pub const REMOTE_MANIFEST_FILES: [&str; 2] = ["plugin.json", "manifest.json"];
+/// 默认分支候选（按顺序探测）
+pub const REMOTE_BRANCHES: [&str; 2] = ["main", "master"];
+/// 清单未写入口脚本时使用的缺省文件名
+pub const REMOTE_DEFAULT_ENTRY: &str = "plugin.js";
+
+/// 解析后的安装来源
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteInstallSource {
+    /// GitHub 仓库主页：自动探测根目录清单（main / master × plugin.json / manifest.json）
+    GithubRepo { owner: String, repo: String },
+    /// 任意 https 直链（.js 脚本 / 清单 JSON；blob 页面地址会先转成 raw）
+    Direct { url: String },
+}
+
+/// GitHub 的 owner / repo 允许的字符集（字母数字与 `- _ .`；不允许空 / `..` / 单个 `.`）
+fn valid_github_part(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 100
+        && s != "."
+        && !s.contains("..")
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// 纯函数：解析用户粘贴的安装地址 → 安装来源。**只接受 https**。
+///
+/// - `https://github.com/<owner>/<repo>[.git][/]` → `GithubRepo`（自动探测清单）
+/// - `https://github.com/<owner>/<repo>/blob/<ref>/<path>` → 转 raw 直链（`Direct`）
+/// - 其他 https → `Direct`（调用方按 `.js` / `.json` 扩展名分辨脚本与清单）
+///
+/// 拒绝：http / 其他协议、缺主机名、空地址、任何 `..`、`.`、编码穿越（%2e/%2f/%5c）、反斜杠。
+pub fn parse_install_source(raw: &str) -> Result<RemoteInstallSource> {
+    let url = raw.trim();
+    if url.is_empty() {
+        bail!("安装地址不能为空");
+    }
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("http://") {
+        bail!("安装地址只接受 https（http 会被拒绝）：{url}");
+    }
+    if !lower.starts_with("https://") {
+        bail!("安装地址必须以 https:// 开头：{url}");
+    }
+    let rest = &url["https://".len()..];
+    let rest = rest.split(['#', '?']).next().unwrap_or(rest);
+    let (authority, raw_path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let host_raw = authority.rsplit('@').next().unwrap_or(authority); // 去掉 userinfo
+    let host = host_raw.rsplit(':').next().unwrap_or(host_raw).to_ascii_lowercase(); // 去掉端口
+    if host.is_empty() {
+        bail!("安装地址缺少主机名：{url}");
+    }
+    let segments: Vec<&str> = raw_path.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in &segments {
+        let s = seg.to_ascii_lowercase();
+        if *seg == ".." || *seg == "." || seg.contains('\\') || s.contains("%2e") || s.contains("%2f") || s.contains("%5c") {
+            bail!("安装地址包含不允许的路径段（{seg}）：{url}");
+        }
+    }
+    if host == "github.com" || host == "www.github.com" {
+        if segments.len() < 2 {
+            bail!("GitHub 地址应为仓库主页 https://github.com/<owner>/<repo>：{url}");
+        }
+        let owner = segments[0];
+        let mut repo = segments[1];
+        if repo.to_ascii_lowercase().ends_with(".git") {
+            repo = &repo[..repo.len() - 4];
+        }
+        if !valid_github_part(owner) || !valid_github_part(repo) {
+            bail!("GitHub 地址的 owner / repo 不合法：{url}");
+        }
+        if segments.len() == 2 {
+            return Ok(RemoteInstallSource::GithubRepo { owner: owner.to_string(), repo: repo.to_string() });
+        }
+        // 浏览器地址栏里的 blob 页面地址 → raw 直链（用户直接粘贴也能装）
+        if segments.len() >= 5 && segments[2].eq_ignore_ascii_case("blob") {
+            let path = segments[4..].join("/");
+            return Ok(RemoteInstallSource::Direct {
+                url: format!("https://raw.githubusercontent.com/{owner}/{repo}/{}/{path}", segments[3]),
+            });
+        }
+        bail!("GitHub 地址只支持仓库主页（https://github.com/<owner>/<repo>）或文件 blob 页；仓库内其他页面请改用 raw 直链：{url}");
+    }
+    Ok(RemoteInstallSource::Direct { url: url.to_string() })
+}
+
+/// 纯函数：GitHub 仓库根目录的清单候选地址（main / master × plugin.json / manifest.json）
+pub fn github_manifest_candidates(owner: &str, repo: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for branch in REMOTE_BRANCHES {
+        for file in REMOTE_MANIFEST_FILES {
+            out.push(format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file}"));
+        }
+    }
+    out
+}
+
+/// 纯函数：清单里的入口脚本 → 绝对 https 地址。
+/// 相对路径按清单所在目录（`base`，可带结尾 `/`）拼接；拒绝 http / 绝对路径 / 盘符 / `..` / 编码穿越。
+pub fn resolve_entry_url(base: &str, entry: &str) -> Result<String> {
+    let e = entry.trim();
+    if e.is_empty() {
+        bail!("插件清单缺少入口脚本（entry），默认应为 {REMOTE_DEFAULT_ENTRY}");
+    }
+    let lower = e.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        return Ok(e.to_string());
+    }
+    if lower.starts_with("http://") {
+        bail!("入口脚本只接受 https 地址：{e}");
+    }
+    if e.starts_with('/') || e.contains('\\') || e.contains(':') {
+        bail!("入口脚本必须是相对路径或 https 直链（不允许绝对路径 / 盘符）：{e}");
+    }
+    if lower.contains("..") || lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c") {
+        bail!("入口脚本路径不允许包含 .. 或编码穿越：{e}");
+    }
+    Ok(format!("{}/{}", base.trim_end_matches('/'), e))
+}
+
+/// 纯函数：净化清单里的插件 id（与 `validate_id` 同级，且额外拒绝单个 `.`）。
+/// 空 id / `../` 穿越 / 路径分隔符 / 盘符 / 非法字符一律报错，绝不把原文当路径用。
+pub fn sanitize_remote_id(raw: &str) -> Result<String> {
+    let id = raw.trim();
+    if id.is_empty() {
+        bail!("插件清单缺少 id（不能为空）");
+    }
+    if id.len() > MAX_ID_LEN {
+        bail!("非法插件 id（长度必须在 1..={MAX_ID_LEN}）：{id:?}");
+    }
+    if id.contains("..") {
+        bail!("非法插件 id（不允许 ..）：{id:?}");
+    }
+    if id == "." {
+        bail!("非法插件 id（不能是单个点）：{id:?}");
+    }
+    if id.contains('/') || id.contains('\\') || id.contains(':') {
+        bail!("非法插件 id（不允许路径分隔符或盘符）：{id:?}");
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        bail!("非法插件 id（只允许字母/数字/-/_/.）：{id:?}");
+    }
+    validate_id(id)?;
+    Ok(id.to_string())
+}
+
+/// 净化展示用文本（名称 / 版本 / 描述 / 作者）：去掉控制字符、裁剪长度、空则回退
+fn clean_remote_text(raw: &str, fallback: &str, max: usize) -> String {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).take(max).collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() { fallback.to_string() } else { cleaned }
+}
+
+/// 直链的路径部分（去掉 query / fragment；`https://` 之后才算路径）
+fn direct_path(url: &str) -> &str {
+    let rest = url.split(['#', '?']).next().unwrap_or(url);
+    let after_scheme = rest.get("https://".len()..).unwrap_or("");
+    match after_scheme.find('/') {
+        Some(i) => &after_scheme[i..],
+        None => "",
+    }
+}
+
+/// 体积上限复核（真实下载与注入式单测共用同一道闸）
+fn enforce_remote_size(bytes: &[u8], max_bytes: usize) -> Result<()> {
+    if bytes.len() > max_bytes {
+        bail!("下载内容超过上限（{} MB），已拒绝", max_bytes / 1024 / 1024);
+    }
+    Ok(())
+}
+
+/// 带「仅 https 重定向 + 超时 + 体积上限」的下载。下载内容只回传字节，调用方只落盘、绝不执行。
+fn http_get_limited(url: &str, max_bytes: usize) -> Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(REMOTE_FETCH_TIMEOUT_SECS))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.url().scheme() != "https" {
+                return attempt.error(std::io::Error::other("拒绝重定向到非 https 地址"));
+            }
+            if attempt.previous().len() >= 5 {
+                return attempt.error(std::io::Error::other("重定向次数过多"));
+            }
+            attempt.follow()
+        }))
+        .build()?;
+    let resp = client.get(url).send().map_err(|e| anyhow!("下载失败（{url}）：{e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        bail!("下载失败：HTTP {status}（{url}）");
+    }
+    if let Some(len) = resp.content_length() {
+        if len > max_bytes as u64 {
+            bail!("下载内容超过上限（{} MB），已拒绝：{url}", max_bytes / 1024 / 1024);
+        }
+    }
+    let mut buf = Vec::new();
+    let mut reader = std::io::Read::take(resp, max_bytes as u64 + 1);
+    std::io::Read::read_to_end(&mut reader, &mut buf).map_err(|e| anyhow!("读取下载内容失败（{url}）：{e}"))?;
+    enforce_remote_size(&buf, max_bytes)?;
+    Ok(buf)
+}
+
+/// 探测 GitHub 仓库根目录的清单（main / master × plugin.json / manifest.json）
+fn probe_github_manifest(fetch: &dyn Fn(&str) -> Result<Vec<u8>>, owner: &str, repo: &str) -> Result<(Json, String)> {
+    let mut last_error = String::new();
+    for url in github_manifest_candidates(owner, repo) {
+        match fetch(&url) {
+            Ok(bytes) => {
+                enforce_remote_size(&bytes, REMOTE_MAX_BYTES)?;
+                let manifest: Json = serde_json::from_slice(&bytes)
+                    .map_err(|e| anyhow!("仓库 {owner}/{repo} 的清单不是合法 JSON（{url}）：{e}"))?;
+                if !manifest.is_object() {
+                    bail!("仓库 {owner}/{repo} 的清单不是 JSON 对象（{url}）");
+                }
+                return Ok((manifest, url));
+            }
+            Err(e) => last_error = e.to_string(),
+        }
+    }
+    bail!(
+        "仓库 {owner}/{repo} 未找到插件清单（main / master 分支的 {}）——请在仓库根目录按 README 约定提供清单（最近一次错误：{last_error}）",
+        REMOTE_MANIFEST_FILES.join(" / ")
+    )
+}
+
+/// 有清单的安装：id / 名称 / 入口全部取自清单（净化后使用）
+fn install_from_manifest(
+    ctx: &Ctx,
+    manifest: &Json,
+    base: &str,
+    source_kind: &str,
+    origin_url: &str,
+    fetch: &dyn Fn(&str) -> Result<Vec<u8>>,
+) -> Result<Json> {
+    let id = sanitize_remote_id(manifest.get("id").and_then(|v| v.as_str()).unwrap_or(""))?;
+    let entry = manifest
+        .get("entry")
+        .and_then(|v| v.as_str())
+        .or_else(|| manifest.get("script").and_then(|v| v.as_str()))
+        .or_else(|| manifest.get("file").and_then(|v| v.as_str()))
+        .unwrap_or(REMOTE_DEFAULT_ENTRY);
+    let script_url = resolve_entry_url(base, entry)?;
+    let bytes = fetch(&script_url).map_err(|e| anyhow!("下载入口脚本失败（{script_url}）：{e}"))?;
+    enforce_remote_size(&bytes, REMOTE_MAX_BYTES)?;
+    let name = clean_remote_text(manifest.get("name").and_then(|v| v.as_str()).unwrap_or(""), &id, 120);
+    let version = clean_remote_text(manifest.get("version").and_then(|v| v.as_str()).unwrap_or(""), "0.0.0", 32);
+    let description = clean_remote_text(manifest.get("description").and_then(|v| v.as_str()).unwrap_or(""), "", 500);
+    let author = clean_remote_text(manifest.get("author").and_then(|v| v.as_str()).unwrap_or(""), "", 120);
+    let permissions = manifest
+        .get("permissions")
+        .cloned()
+        .filter(|v| v.is_array())
+        .unwrap_or_else(|| json!([]));
+    persist_remote_plugin(ctx, &id, &name, &version, &description, &author, &permissions, &bytes, source_kind, origin_url)
+}
+
+/// 直链 .js：没有清单，插件 id 取文件名（净化不通过则明确报错，不猜）
+fn install_direct_script(ctx: &Ctx, url: &str, fetch: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<Json> {
+    let path = direct_path(url);
+    let file = path.rsplit('/').next().unwrap_or("");
+    if file.len() <= 3 {
+        bail!("无法从文件名推断插件 id（{file}）：请改用清单 JSON 地址安装");
+    }
+    let stem = &file[..file.len() - 3]; // 调用方已确认以 .js / .JS 结尾
+    let id = sanitize_remote_id(stem).map_err(|e| anyhow!("无法从文件名推断插件 id（{stem}）：{e}"))?;
+    let bytes = fetch(url)?;
+    enforce_remote_size(&bytes, REMOTE_MAX_BYTES)?;
+    persist_remote_plugin(ctx, &id, &id, "0.0.0", "", "", &json!([]), &bytes, "url", url)
+}
+
+/// 落盘 + 登记：只写 `<data>/plugins/<id>/` 内；脚本原文写入 `plugin.js`，绝不执行
+fn persist_remote_plugin(
+    ctx: &Ctx,
+    id: &str,
+    name: &str,
+    version: &str,
+    description: &str,
+    author: &str,
+    permissions: &Json,
+    script: &[u8],
+    source: &str,
+    origin_url: &str,
+) -> Result<Json> {
+    validate_id(id)?;
+    if script.is_empty() {
+        bail!("插件脚本为空，拒绝安装 {id}");
+    }
+    let sha = sha256_bytes(script);
+    let dir = plugin_dir(ctx, id);
+    std::fs::create_dir_all(&dir)?;
+    write_atomic(&plugin_script(ctx, id), script)?;
+    let manifest = json!({
+        "id": id,
+        "name": name,
+        "version": version,
+        "description": description,
+        "author": author,
+        "sha256": sha.clone(),
+        "permissions": permissions,
+        "installed_at": now_iso(),
+        "source": source,
+        "source_url": origin_url,
+    });
+    write_atomic(&dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?.as_bytes())?;
+    let record = json!({
+        "id": id,
+        "name": name,
+        "version": version,
+        "description": description,
+        "author": author,
+        "sha256": sha.clone(),
+        "source": source,
+        "enabled": true,
+        "installed_at": manifest.get("installed_at").cloned().unwrap_or(Json::Null),
+    });
+    let mut reg = read_registry(ctx);
+    upsert_entry(&mut reg, record.clone())?;
+    write_registry(ctx, &reg)?;
+    log_event(
+        ctx,
+        "info",
+        id,
+        "install",
+        &format!("已安装 {name} v{version}（来源 {source}，sha256 {}）", &sha[..12.min(sha.len())]),
+    );
+    Ok(public_record(&record))
+}
+
+/// 从 URL 安装（真实网络版：下载走 http_get_limited）
+pub fn install_from_url(ctx: &Ctx, url: &str) -> Result<Json> {
+    install_from_url_with(ctx, url, &|u| http_get_limited(u, REMOTE_MAX_BYTES))
+}
+
+/// 安装主流程（下载函数可注入：单测用假 fetch 覆盖全流程，不碰网络）
+fn install_from_url_with(ctx: &Ctx, url: &str, fetch: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<Json> {
+    match parse_install_source(url)? {
+        RemoteInstallSource::GithubRepo { owner, repo } => {
+            let (manifest, manifest_url) = probe_github_manifest(fetch, &owner, &repo)?;
+            let base = match manifest_url.rfind('/') {
+                Some(i) => manifest_url[..i].to_string(),
+                None => manifest_url.clone(),
+            };
+            install_from_manifest(ctx, &manifest, &base, "github", url, fetch)
+        }
+        RemoteInstallSource::Direct { url: direct } => {
+            let path_lower = direct_path(&direct).to_ascii_lowercase();
+            if path_lower.ends_with(".js") {
+                install_direct_script(ctx, &direct, fetch)
+            } else if path_lower.ends_with(".json") {
+                let bytes = fetch(&direct)?;
+                enforce_remote_size(&bytes, REMOTE_MAX_BYTES)?;
+                let manifest: Json = serde_json::from_slice(&bytes)
+                    .map_err(|e| anyhow!("插件清单不是合法 JSON（{direct}）：{e}"))?;
+                if !manifest.is_object() {
+                    bail!("插件清单不是 JSON 对象（{direct}）");
+                }
+                let clean = direct.split(['#', '?']).next().unwrap_or(direct.as_str());
+                let base = match clean.rfind('/') {
+                    Some(i) => clean[..i].to_string(),
+                    None => clean.to_string(),
+                };
+                install_from_manifest(ctx, &manifest, &base, "url", url, fetch)
+            } else {
+                bail!("不支持的直链类型（只支持 .js 脚本或 .json 清单，或 GitHub 仓库地址）：{direct}")
+            }
+        }
+    }
+}
+
 /* ==================== 插件管理 ==================== */
 
 /// 已安装插件列表
@@ -646,7 +1024,8 @@ impl Sandbox {
         out
     }
 
-    /// 在沙箱里求值并转成字符串
+    /// 在沙箱里求值并转成字符串（仅测试使用：生产路径统一走 run/eval 的结构化接口）
+    #[cfg(test)]
     fn eval_text(&self, source: &str) -> Result<String> {
         let v = self.eval(source, "probe.js")?;
         Ok(match v {
@@ -1055,14 +1434,14 @@ pub fn analyze_url(raw: &str) -> Json {
         return json!({ "ok": false, "url": raw, "direct": false, "kind": "unknown", "confidence": 0.0,
                        "reason": "空 URL" });
     }
-    // 非 http(s)：磁力 / ed2k / ftp 等本身即「直链」
+    // 非 http(s)：磁力 / ftp 等本身即「直链」
     let (scheme, rest) = match url.split_once("://") {
         Some((s, r)) => (s.to_ascii_lowercase(), r),
         None => (String::new(), ""),
     };
     if scheme.is_empty() {
         let head = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase()).unwrap_or_default();
-        if matches!(head.as_str(), "magnet" | "ed2k" | "thunder" | "ftp" | "ftps") {
+        if matches!(head.as_str(), "magnet" | "thunder" | "ftp" | "ftps") {
             return json!({
                 "ok": true, "url": url, "scheme": head, "host": "", "path": "", "filename": "", "ext": "",
                 "kind": "p2p", "direct": true, "confidence": 0.95,
@@ -2148,5 +2527,291 @@ mod tests {
             "重试请求要写进日志：{logs:?}"
         );
         assert!(logs.iter().any(|l| l.contains("事件 download:error")), "派发小结要写进日志：{logs:?}");
+    }
+
+    /* ---------- 从 URL 安装：URL → 安装来源（纯函数） ---------- */
+
+    #[test]
+    fn install_source_parses_github_repo_addresses() {
+        for (raw, owner, repo) in [
+            ("https://github.com/acme/umi-plugin", "acme", "umi-plugin"),
+            ("https://github.com/acme/umi-plugin.git", "acme", "umi-plugin"),
+            ("https://github.com/acme/umi-plugin/", "acme", "umi-plugin"),
+            ("   https://github.com/acme/umi-plugin.git   ", "acme", "umi-plugin"),
+            ("https://GitHub.com/Acme/Umi-Plugin", "Acme", "Umi-Plugin"),
+            ("https://github.com/acme/umi-plugin?tab=readme", "acme", "umi-plugin"),
+        ] {
+            match parse_install_source(raw).unwrap_or_else(|e| panic!("{raw} 应能解析：{e}")) {
+                RemoteInstallSource::GithubRepo { owner: o, repo: r } => {
+                    assert_eq!((o.as_str(), r.as_str()), (owner, repo), "{raw}");
+                }
+                other => panic!("{raw} 应解析为 GitHub 仓库，实际 {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn install_source_parses_direct_and_blob_links() {
+        match parse_install_source("https://example.com/plugs/my-tool.js").unwrap() {
+            RemoteInstallSource::Direct { url } => assert_eq!(url, "https://example.com/plugs/my-tool.js"),
+            other => panic!("直链 .js 应解析为 Direct，实际 {other:?}"),
+        }
+        match parse_install_source("https://raw.githubusercontent.com/acme/umi-plugin/main/plugin.json").unwrap() {
+            RemoteInstallSource::Direct { url } => assert!(url.ends_with("/plugin.json")),
+            other => panic!("raw 直链不应按仓库主页处理，实际 {other:?}"),
+        }
+        // 浏览器地址栏里的 blob 页面 → 自动转 raw
+        match parse_install_source("https://github.com/acme/umi-plugin/blob/main/plugin.json").unwrap() {
+            RemoteInstallSource::Direct { url } => {
+                assert_eq!(url, "https://raw.githubusercontent.com/acme/umi-plugin/main/plugin.json")
+            }
+            other => panic!("blob 地址应转 raw，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_source_rejects_non_https_addresses() {
+        for raw in [
+            "http://github.com/acme/umi-plugin",
+            "http://example.com/plugin.js",
+            "ftp://example.com/plugin.js",
+            "file:///C:/plugin.js",
+            "github.com/acme/umi-plugin",
+            "",
+            "    ",
+        ] {
+            let err = parse_install_source(raw).expect_err(&format!("{raw:?} 必须被拒绝"));
+            assert!(!err.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn install_source_rejects_traversal_and_malformed_github() {
+        for raw in [
+            "https://github.com/../repo",
+            "https://github.com/acme/..",
+            "https://github.com/acme/../../etc",
+            "https://github.com/acme",
+            "https://github.com//repo",
+            "https://github.com/acme/%2e%2e/repo",
+            "https://github.com/acme/umi-plugin/tree/main/src",
+            "https://github.com/acme/umi-plugin/blob/main",
+            "https://github.com/acme/umi plugin",
+            "https:///repo",
+        ] {
+            assert!(parse_install_source(raw).is_err(), "{raw} 必须被拒绝");
+        }
+    }
+
+    #[test]
+    fn github_manifest_candidates_shape() {
+        let c = github_manifest_candidates("acme", "umi-plugin");
+        assert_eq!(c.len(), REMOTE_BRANCHES.len() * REMOTE_MANIFEST_FILES.len());
+        for u in &c {
+            assert!(u.starts_with("https://raw.githubusercontent.com/acme/umi-plugin/"), "{u}");
+            assert!(!u.contains("..") && !u.contains('\\'), "{u}");
+        }
+        assert_eq!(c[0], "https://raw.githubusercontent.com/acme/umi-plugin/main/plugin.json");
+        assert!(c.iter().any(|u| u.ends_with("/master/manifest.json")), "{c:?}");
+    }
+
+    #[test]
+    fn sanitize_remote_id_blocks_empty_traversal_and_absolute_paths() {
+        for bad in ["", "   ", "../evil", "..", ".", "a/b", "a\\b", "/abs", "C:\\evil", "a..b", "插件", "bad id"] {
+            assert!(sanitize_remote_id(bad).is_err(), "{bad:?} 必须被拒绝");
+        }
+        assert!(sanitize_remote_id(&"x".repeat(MAX_ID_LEN + 1)).is_err(), "超长 id 必须被拒绝");
+        assert!(sanitize_remote_id(&"x".repeat(MAX_ID_LEN)).is_ok(), "上限长度应通过");
+        assert_eq!(sanitize_remote_id("  ok-plugin_1.0  ").unwrap(), "ok-plugin_1.0");
+        assert_eq!(sanitize_remote_id("direct-link-sniffer").unwrap(), "direct-link-sniffer");
+    }
+
+    #[test]
+    fn resolve_entry_url_keeps_relative_and_rejects_escape() {
+        assert_eq!(
+            resolve_entry_url("https://raw.githubusercontent.com/acme/umi-plugin/main", "plugin.js").unwrap(),
+            "https://raw.githubusercontent.com/acme/umi-plugin/main/plugin.js"
+        );
+        assert_eq!(
+            resolve_entry_url("https://example.com/plugs", "lib/body.js").unwrap(),
+            "https://example.com/plugs/lib/body.js"
+        );
+        assert_eq!(
+            resolve_entry_url("https://example.com/plugs", "https://cdn.example.com/x.js").unwrap(),
+            "https://cdn.example.com/x.js"
+        );
+        for bad in ["", "  ", "../evil.js", "..\\evil.js", "/abs/evil.js", "C:/evil.js", "http://example.com/x.js", "%2e%2e/x.js"] {
+            assert!(resolve_entry_url("https://example.com/plugs", bad).is_err(), "{bad:?} 必须被拒绝");
+        }
+    }
+
+    /* ---------- 从 URL 安装：主流程（注入式下载，不碰网络） ---------- */
+
+    /// 假下载（注入式）：命中表外的地址一律 404，模拟清单探测失败
+    fn fake_fetch<'a>(pairs: &'a [(&'a str, &'a [u8])]) -> impl Fn(&str) -> Result<Vec<u8>> + 'a {
+        move |url| {
+            pairs
+                .iter()
+                .find(|(u, _)| *u == url)
+                .map(|(_, b)| b.to_vec())
+                .ok_or_else(|| anyhow!("404 {url}"))
+        }
+    }
+
+    #[test]
+    fn install_from_github_repo_writes_only_inside_plugins_dir() {
+        let env = TempEnv::new("ghinstall");
+        let ctx = env.ctx();
+        let manifest = json!({
+            "id": "acme-demo",
+            "name": "Acme 演示插件",
+            "version": "1.2.3",
+            "description": "从 GitHub 安装的示例",
+            "author": "acme",
+            "permissions": ["resolve"],
+            "entry": "src/plugin.js",
+        });
+        let m = serde_json::to_vec(&manifest).unwrap();
+        let script = b"umi.log('acme demo');".to_vec();
+        let manifest_url = "https://raw.githubusercontent.com/acme/umi-plugin/main/plugin.json";
+        let script_url = "https://raw.githubusercontent.com/acme/umi-plugin/main/src/plugin.js";
+        let pairs = [(manifest_url, m.as_slice()), (script_url, script.as_slice())];
+        let fetch = fake_fetch(&pairs);
+
+        let rec = install_from_url_with(&ctx, "https://github.com/acme/umi-plugin.git", &fetch).expect("GitHub 仓库安装应成功");
+        // 返回结构与 plugin_install（public_record）一致：8 个字段都在
+        for key in ["id", "name", "version", "description", "enabled", "sha256", "source", "installed_at"] {
+            assert!(rec.get(key).is_some(), "返回结构应与 plugin_install 一致，缺字段 {key}: {rec}");
+        }
+        assert_eq!(rec.get("id").and_then(|v| v.as_str()), Some("acme-demo"));
+        assert_eq!(rec.get("name").and_then(|v| v.as_str()), Some("Acme 演示插件"));
+        assert_eq!(rec.get("version").and_then(|v| v.as_str()), Some("1.2.3"));
+        assert_eq!(rec.get("source").and_then(|v| v.as_str()), Some("github"));
+        assert_eq!(rec.get("enabled").and_then(|v| v.as_bool()), Some(true));
+
+        // 脚本原文落盘（只在插件目录内），sha256 = 文件真实摘要
+        assert_eq!(std::fs::read(plugin_script(&ctx, "acme-demo")).unwrap(), script);
+        let sha = rec.get("sha256").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(sha, sha256_file(&plugin_script(&ctx, "acme-demo")).unwrap());
+        assert!(plugin_dir(&ctx, "acme-demo").starts_with(plugins_dir(&ctx)));
+
+        // 已登记，列表可见
+        let list = list_plugins(&ctx);
+        assert!(list.as_array().unwrap().iter().any(|p| p.get("id").and_then(|v| v.as_str()) == Some("acme-demo")));
+
+        // 宿主写的 manifest.json 记录来源与原始地址
+        let written = std::fs::read_to_string(plugin_dir(&ctx, "acme-demo").join("manifest.json")).unwrap();
+        let disk: Json = serde_json::from_str(&written).unwrap();
+        assert_eq!(disk.get("source").and_then(|v| v.as_str()), Some("github"));
+        assert_eq!(disk.get("source_url").and_then(|v| v.as_str()), Some("https://github.com/acme/umi-plugin.git"));
+    }
+
+    #[test]
+    fn install_from_github_repo_falls_back_to_master_manifest() {
+        let env = TempEnv::new("ghfallback");
+        let ctx = env.ctx();
+        let manifest = json!({ "id": "fallback-demo", "name": "回退示例", "version": "0.1.0" });
+        let m = serde_json::to_vec(&manifest).unwrap();
+        let script = b"umi.log('fallback');".to_vec();
+        let manifest_url = "https://raw.githubusercontent.com/acme/fallback/master/manifest.json";
+        let script_url = "https://raw.githubusercontent.com/acme/fallback/master/plugin.js";
+        let pairs = [(manifest_url, m.as_slice()), (script_url, script.as_slice())];
+        let fetch = fake_fetch(&pairs);
+        let rec = install_from_url_with(&ctx, "https://github.com/acme/fallback/", &fetch).expect("应回退到 master/manifest.json");
+        assert_eq!(rec.get("id").and_then(|v| v.as_str()), Some("fallback-demo"));
+        assert_eq!(std::fs::read(plugin_script(&ctx, "fallback-demo")).unwrap(), script);
+    }
+
+    #[test]
+    fn install_from_direct_js_uses_file_name_and_runs_in_sandbox() {
+        let env = TempEnv::new("jsdirect");
+        let ctx = env.ctx();
+        let script = b"umi.export('selfTest', function () { return true; });".to_vec();
+        let pairs = [("https://example.com/plugs/my-tool.js", script.as_slice())];
+        let fetch = fake_fetch(&pairs);
+        let rec = install_from_url_with(&ctx, "https://example.com/plugs/my-tool.js", &fetch).expect("直链 .js 应安装");
+        assert_eq!(rec.get("id").and_then(|v| v.as_str()), Some("my-tool"));
+        assert_eq!(rec.get("name").and_then(|v| v.as_str()), Some("my-tool"), "无清单时名称取文件名");
+        assert_eq!(rec.get("source").and_then(|v| v.as_str()), Some("url"));
+        assert_eq!(std::fs::read(plugin_script(&ctx, "my-tool")).unwrap(), script);
+        // 装完能在沙箱里跑起来（selfTest 返回 true）——内容照常不被宿主执行
+        let t = test_plugin(&ctx, "my-tool");
+        assert_eq!(t.get("ok").and_then(|v| v.as_bool()), Some(true), "安装的脚本应能在沙箱里执行: {t}");
+
+        // 文件名无法净化时必须明确拒绝，不猜
+        let pairs2 = [("https://example.com/plugs/bad name.js", script.as_slice())];
+        let bad = fake_fetch(&pairs2);
+        let err = install_from_url_with(&ctx, "https://example.com/plugs/bad name.js", &bad).expect_err("非法文件名应被拒绝");
+        assert!(err.to_string().contains("插件 id"), "{err}");
+    }
+
+    #[test]
+    fn install_from_direct_manifest_json_resolves_entry_relative() {
+        let env = TempEnv::new("jsondirect");
+        let ctx = env.ctx();
+        let manifest = json!({ "id": "direct-json", "name": "直链清单", "version": "2.0.0", "entry": "lib/body.js" });
+        let m = serde_json::to_vec(&manifest).unwrap();
+        let script = b"umi.log('direct json');".to_vec();
+        let pairs = [
+            ("https://example.com/plugs/plugin.json", m.as_slice()),
+            ("https://example.com/plugs/lib/body.js", script.as_slice()),
+        ];
+        let fetch = fake_fetch(&pairs);
+        let rec = install_from_url_with(&ctx, "https://example.com/plugs/plugin.json", &fetch).expect("直链清单应安装");
+        assert_eq!(rec.get("id").and_then(|v| v.as_str()), Some("direct-json"));
+        assert_eq!(rec.get("version").and_then(|v| v.as_str()), Some("2.0.0"));
+        assert_eq!(std::fs::read(plugin_script(&ctx, "direct-json")).unwrap(), script);
+    }
+
+    #[test]
+    fn install_from_url_rejects_traversal_without_touching_disk() {
+        let env = TempEnv::new("urlguard");
+        let ctx = env.ctx();
+        // http 在解析阶段被拒：下载函数不应被调用
+        let never = |_: &str| -> Result<Vec<u8>> { panic!("http 地址不应发起任何下载") };
+        let err = install_from_url_with(&ctx, "http://github.com/acme/umi-plugin", &never).expect_err("http 必须被拒绝");
+        assert!(err.to_string().contains("https"), "{err}");
+
+        // 清单 id 穿越 → 拒绝，插件目录保持为空
+        let manifest = json!({ "id": "../../evil", "entry": "plugin.js" });
+        let m = serde_json::to_vec(&manifest).unwrap();
+        let pairs = [
+            ("https://example.com/evil/plugin.json", m.as_slice()),
+            ("https://example.com/evil/plugin.js", b"umi.log('x');".as_slice()),
+        ];
+        let fetch = fake_fetch(&pairs);
+        let err = install_from_url_with(&ctx, "https://example.com/evil/plugin.json", &fetch).expect_err("穿越 id 必须被拒绝");
+        assert!(err.to_string().contains("非法插件 id"), "{err}");
+        assert_eq!(std::fs::read_dir(plugins_dir(&ctx)).map(|d| d.count()).unwrap_or(0), 0, "被拒绝的安装不应留下任何文件");
+
+        // 清单 entry 穿越 → 拒绝
+        let manifest2 = json!({ "id": "ok-id", "entry": "../escape.js" });
+        let m2 = serde_json::to_vec(&manifest2).unwrap();
+        let pairs2 = [
+            ("https://example.com/evil2/plugin.json", m2.as_slice()),
+            ("https://example.com/escape.js", b"umi.log('x');".as_slice()),
+        ];
+        let fetch2 = fake_fetch(&pairs2);
+        let err2 = install_from_url_with(&ctx, "https://example.com/evil2/plugin.json", &fetch2).expect_err("entry 穿越必须被拒绝");
+        assert!(err2.to_string().contains("入口脚本"), "{err2}");
+        assert!(!plugin_dir(&ctx, "ok-id").exists());
+
+        // 不支持的直链类型
+        let err3 = install_from_url_with(&ctx, "https://example.com/plugs/readme.txt", &never).expect_err("未知扩展名应被拒绝");
+        assert!(err3.to_string().contains("不支持的直链"), "{err3}");
+    }
+
+    #[test]
+    fn install_from_url_enforces_size_cap_and_timeout_budget() {
+        assert!(REMOTE_FETCH_TIMEOUT_SECS <= 60, "超时不得高于 60s");
+        assert_eq!(REMOTE_MAX_BYTES, 5 * 1024 * 1024, "体积上限应正好 5 MB");
+        let env = TempEnv::new("urlcap");
+        let ctx = env.ctx();
+        let huge = vec![b'x'; REMOTE_MAX_BYTES + 1];
+        let pairs = [("https://example.com/plugs/huge.js", huge.as_slice())];
+        let fetch = fake_fetch(&pairs);
+        let err = install_from_url_with(&ctx, "https://example.com/plugs/huge.js", &fetch).expect_err("超过 5 MB 必须拒绝");
+        assert!(err.to_string().contains("上限"), "{err}");
+        assert!(!plugin_dir(&ctx, "huge").exists(), "超限内容不得落盘");
     }
 }

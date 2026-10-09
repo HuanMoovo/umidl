@@ -45,9 +45,9 @@ describe('批量导入：链接识别 / 去重计数', () => {
     expect(p.overflow).toBe(7)
   })
 
-  it('磁力 / ed2k 等非 http 链接同样被识别（过滤交给后端）', () => {
-    const p = parseLinks('magnet:?xt=urn:btih:abc\ned2k://|file|a.bin|1024|ABCD|/')
-    expect(p.unique).toEqual(['magnet:?xt=urn:btih:abc', 'ed2k://|file|a.bin|1024|ABCD|/'])
+  it('磁力 / ftp 等非 http 链接同样被识别（识别在前端，入队判定交给后端）', () => {
+    const p = parseLinks('magnet:?xt=urn:btih:abc\nftp://a.example/x.iso')
+    expect(p.unique).toEqual(['magnet:?xt=urn:btih:abc', 'ftp://a.example/x.iso'])
   })
 })
 

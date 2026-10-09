@@ -68,7 +68,6 @@ const STATUS_MAP: Record<TaskStatus, { label: string; color: string; icon: any }
   extracting: { label: tr('提取音频'), color: 'text-cyan-600 dark:text-cyan-400', icon: RefreshOutline },
   transcribing: { label: tr('AI 识别中'), color: 'text-pink-600 dark:text-pink-400', icon: RefreshOutline },
   done: { label: tr('已完成'), color: 'text-emerald-600 dark:text-emerald-400', icon: CheckmarkCircleOutline },
-  handed_off: { label: tr('已交给引擎'), color: 'text-sky-600 dark:text-sky-400', icon: CheckmarkCircleOutline },
   error: { label: tr('失败'), color: 'text-rose-600 dark:text-rose-400', icon: AlertCircleOutline },
   canceled: { label: tr('已取消'), color: 's-text-3', icon: CloseCircleOutline },
 }

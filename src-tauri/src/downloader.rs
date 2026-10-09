@@ -1474,9 +1474,21 @@ const ARIA2_FILE_EXTS: &[&str] = &[
     "jpg", "jpeg", "png", "webp", "gif", "bmp", "ico", "svg", "tif", "tiff", "psd", "heic",
 ];
 
+/// 从 URL 取扩展名（小写；忽略 query / fragment；目录名不算扩展名）
+fn url_ext(url: &str) -> Option<String> {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let last = path.rsplit('/').next().unwrap_or(path);
+    match last.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() && ext.len() <= 8 => {
+            Some(ext.to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
 /// 看起来像文件直链？（HLS/DASH 的 m3u8/mpd 不算——那些交给 yt-dlp 合并）
 pub fn is_probably_file_url(url: &str) -> bool {
-    match crate::filters::Filters::ext_of(url) {
+    match url_ext(url) {
         Some(ext) => ARIA2_FILE_EXTS.contains(&ext.as_str()),
         None => false,
     }
@@ -1485,7 +1497,7 @@ pub fn is_probably_file_url(url: &str) -> bool {
 /// 直链或协议链接（HTTP/FTP/BT/磁力）——这两类由 aria2 负责
 pub fn is_direct_or_protocol(url: &str) -> bool {
     let u = url.trim().to_ascii_lowercase();
-    if u.starts_with("magnet:") || u.starts_with("ed2k:") || u.ends_with(".torrent") {
+    if u.starts_with("magnet:") || u.ends_with(".torrent") {
         return true;
     }
     if u.starts_with("ftp://") || u.starts_with("ftps://") {
@@ -1667,9 +1679,6 @@ pub fn run_aria2<F>(
 where
     F: FnMut(ProgressTick),
 {
-    if req.url.trim().to_ascii_lowercase().starts_with("ed2k:") {
-        anyhow::bail!("ED2K 电驴链接目前没有可用的开源引擎，暂不支持（HTTP/FTP/BT/磁力均可用）");
-    }
     let exe = ctx.tools.aria2()?.to_path_buf();
     ensure_dir(out_dir)?;
     let args = build_aria2_args(ctx, req, out_dir);
@@ -2066,7 +2075,7 @@ mod aria2_tests {
     fn tctx(settings: AppSettings) -> Ctx {
         Ctx::new(
             AppDirs::new(),
-            ToolPaths { ytdlp: None, ffmpeg: None, ffprobe: None, whisper: None, aria2: None, pandoc: None, poppler: None, emule: None },
+            ToolPaths { ytdlp: None, ffmpeg: None, ffprobe: None, whisper: None, aria2: None, pandoc: None, poppler: None },
             settings,
         )
     }
@@ -2228,7 +2237,7 @@ mod dlproxy_tests {
     fn pctx(settings: AppSettings) -> Ctx {
         Ctx::new(
             AppDirs::new(),
-            ToolPaths { ytdlp: None, ffmpeg: None, ffprobe: None, whisper: None, aria2: None, pandoc: None, poppler: None, emule: None },
+            ToolPaths { ytdlp: None, ffmpeg: None, ffprobe: None, whisper: None, aria2: None, pandoc: None, poppler: None },
             settings,
         )
     }
@@ -2368,7 +2377,7 @@ mod dlproxy_tests {
         let mut s2 = AppSettings::default();
         s2.proxy = Some("http://127.0.0.1:59116".into());
         let ctx2 = pctx(s2);
-        assert_eq!(effective_proxy(&ctx2, "http://127.0.0.1:6970/api"), None);
+        assert_eq!(effective_proxy(&ctx2, "http://127.0.0.1:8080/api"), None);
     }
 
     /* ==================== A3：直连决策必须真的直连 ==================== */

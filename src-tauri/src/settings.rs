@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use crate::capture;
 use crate::ctx::AppDirs;
 use crate::models::AppSettings;
 
@@ -18,15 +17,10 @@ pub fn load(dirs: &AppDirs) -> AppSettings {
     if s.concurrency <= 0 {
         s.concurrency = 3;
     }
-    if s.theme.trim().is_empty() {
+    // 「跟随系统」已移除：历史配置里的 'system'（及空值）一律回退 dark，不报错
+    let theme = s.theme.trim().to_ascii_lowercase();
+    if theme.is_empty() || theme == "system" {
         s.theme = "dark".into();
-    }
-    // 捕获令牌（BUG-06）：启用捕获端口时**必须**有令牌 —— 缺失（首启 / 用户清空后保存）就
-    // 现场生成一个随机令牌并落盘。放在 load() 里，设置文件、内存快照、捕获服务、
-    // 设置页 UI 四处读到的永远是同一个令牌。
-    if s.capture_port > 0 && s.capture_token.trim().is_empty() {
-        s.capture_token = capture::generate_token();
-        let _ = save(dirs, &s);
     }
     s
 }

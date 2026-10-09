@@ -1,6 +1,6 @@
 [package]
 name = "umidl"
-version = "1.8.10"
+version = "1.8.11"
 description = "Umidl - 轻量化视频下载 / 转换 / AI 字幕桌面客户端"
 authors = ["umi"]
 edition = "2021"

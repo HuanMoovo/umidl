@@ -20,7 +20,6 @@ pub fn hint_for(name: &str) -> (&'static str, Option<&'static str>) {
         "aria2" => ("分段并行下载引擎（HTTP/FTP/BT/磁力，16 连接）", Some("约 5 MB")),
         "pandoc" => ("文档格式互转引擎（docx/odt/rtf/epub/html/md）", Some("约 35 MB")),
         "poppler" => ("PDF 处理引擎（pdftotext / pdftoppm）", Some("约 42 MB")),
-        "emule" => ("ED2K 电驴下载引擎（eMule 社区版，可被本程序接管）", Some("约 4 MB")),
         "imagemagick" => (
             "图片格式引擎（PSD / DDS 写出、HEIC 读取等 ffmpeg 写不出的格式）",
             Some("约 12 MB（解压后约 240 MB）"),
@@ -51,32 +50,6 @@ fn which(name: &str) -> Option<PathBuf> {
         }
     }
     None
-}
-
-/// 工具探活方式
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProbeKind {
-    /// 启动一次子进程，同时拿到「能不能跑 + 版本号」
-    Exec,
-    /// 只核对文件存在，**绝不启动**程序：GUI 程序（eMule）的 `--version` / `--help`
-    /// 都不会退出，启动式探活会把整个刷新永久卡住（真机上锁死过设置页）
-    ExistsOnly,
-}
-
-/// 该工具的探活方式（纯函数，便于单测）
-pub fn probe_kind(name: &str) -> ProbeKind {
-    match name {
-        "emule" => ProbeKind::ExistsOnly,
-        _ => ProbeKind::Exec,
-    }
-}
-
-/// 探活方式的对外文本（写进 ToolStatus，界面据此标注「不启动探测」）
-pub fn probe_kind_str(name: &str) -> &'static str {
-    match probe_kind(name) {
-        ProbeKind::Exec => "exec",
-        ProbeKind::ExistsOnly => "exists",
-    }
 }
 
 /// 单次探活命令的超时：到点强制结束（含子孙进程），刷新不会永久卡住
@@ -245,10 +218,6 @@ pub fn run_capture(cmd: &mut std::process::Command, timeout: Duration) -> CmdCap
 
 /// 一次子进程同时拿到「可用性 + 版本号」，避免同一工具被启动两次（超时可注入，便于单测）
 fn run_probe_with(p: &Path, name: &str, timeout: Duration) -> (bool, Option<String>) {
-    // 不适用启动式探活的工具（GUI 程序）：只核对文件在不在
-    if probe_kind(name) == ProbeKind::ExistsOnly {
-        return (p.is_file(), None);
-    }
     // poppler 的 pdftotext 不认 `--version`（会当成文件名，输出
     // "I/O Error: Couldn't open file '--version': No error." → 旧解析器把 "No" 当版本号）；`-v` 才对
     let args: Vec<&str> = match name {
@@ -382,7 +351,6 @@ pub fn resolve_tool(ctx: &Ctx, name: &str, explicit: Option<&String>) -> (Option
     let stem = match name {
         "whisper" => "whisper-cli",
         "aria2" => "aria2c",
-        "emule" => "emule",
         other => other,
     };
     let file = exe_name(stem);
@@ -391,7 +359,6 @@ pub fn resolve_tool(ctx: &Ctx, name: &str, explicit: Option<&String>) -> (Option
     // 需要独立子目录/独立可执行名的工具（自带 DLL 或含多程序）
     let sub: Option<(&str, &str)> = match name {
         "poppler" => Some(("poppler", "pdftotext")),
-        "emule" => Some(("emule", "emule")),
         "imagemagick" => Some(("imagemagick", "magick")),
         _ => None,
     };
@@ -478,7 +445,6 @@ pub fn resolve_all(ctx: &Ctx) -> crate::ctx::ToolPaths {
     let (aria2, _) = resolve_tool(ctx, "aria2", None);
     let (pandoc, _) = resolve_tool(ctx, "pandoc", None);
     let (poppler, _) = resolve_tool(ctx, "poppler", None);
-    let (emule, _) = resolve_tool(ctx, "emule", None);
     // ffprobe 通常与 ffmpeg 同目录
     let ffprobe = ffprobe.or_else(|| {
         ffmpeg
@@ -486,7 +452,7 @@ pub fn resolve_all(ctx: &Ctx) -> crate::ctx::ToolPaths {
             .and_then(|f| f.parent().map(|d| d.join(exe_name("ffprobe"))))
             .filter(|p| p.is_file())
     });
-    crate::ctx::ToolPaths { ytdlp, ffmpeg, ffprobe, whisper, aria2, pandoc, poppler, emule }
+    crate::ctx::ToolPaths { ytdlp, ffmpeg, ffprobe, whisper, aria2, pandoc, poppler }
 }
 
 /// 版本号（走「路径 + 修改时间」缓存，热启动不再启动子进程）
@@ -562,7 +528,6 @@ fn statuses_for(ctx: &Ctx, names: &[&str], fresh: bool) -> Vec<ToolStatus> {
                 size_hint: Some(model_size_hint(&ctx.settings.whisper_model)),
                 origin: None,
                 installable: true,
-                probe: None,
             });
             continue;
         }
@@ -591,7 +556,6 @@ fn statuses_for(ctx: &Ctx, names: &[&str], fresh: bool) -> Vec<ToolStatus> {
                 size_hint: size_hint.map(|s| s.to_string()),
                 origin: None,
                 installable: installable(name),
-                probe: Some(probe_kind_str(name).into()),
             });
             continue;
         }
@@ -604,7 +568,6 @@ fn statuses_for(ctx: &Ctx, names: &[&str], fresh: bool) -> Vec<ToolStatus> {
             "aria2" => tools.aria2.clone(),
             "pandoc" => tools.pandoc.clone(),
             "poppler" => tools.poppler.clone(),
-            "emule" => tools.emule.clone(),
             _ => None,
         };
         let explicit = match name {
@@ -637,7 +600,6 @@ fn statuses_for(ctx: &Ctx, names: &[&str], fresh: bool) -> Vec<ToolStatus> {
             size_hint: size_hint.map(|s| s.to_string()),
             origin: None,
             installable: installable(name),
-            probe: Some(probe_kind_str(name).into()),
         });
     }
     out
@@ -879,8 +841,8 @@ pub fn model_size_hint(model: &str) -> String {
  */
 
 /// 工具清单（检测 / 安装 / 迁移 / 批量操作的唯一顺序来源，与设置页展示顺序一致）
-pub const TOOL_ORDER: [&str; 10] = [
-    "yt-dlp", "ffmpeg", "ffprobe", "whisper", "aria2", "pandoc", "poppler", "emule",
+pub const TOOL_ORDER: [&str; 9] = [
+    "yt-dlp", "ffmpeg", "ffprobe", "whisper", "aria2", "pandoc", "poppler",
     "imagemagick", "whisper-model",
 ];
 
@@ -989,10 +951,6 @@ pub fn managed_entries(name: &str) -> Vec<(String, EntryKind)> {
             ("poppler".to_string(), EntryKind::Dir),
             (exe_name("pdftotext"), EntryKind::File),
         ],
-        "emule" => vec![
-            ("emule".to_string(), EntryKind::Dir),
-            (exe_name("emule"), EntryKind::File),
-        ],
         "imagemagick" => vec![
             ("imagemagick".to_string(), EntryKind::Dir),
             (exe_name("magick"), EntryKind::File),
@@ -1009,7 +967,7 @@ pub fn migratable(name: &str) -> bool {
 /// 某个工具在受管目录里的**可执行候选位置**（顺序 = 解析优先级；含各自子目录 / 可执行名差异）。
 ///
 /// 这张表是「安装后判定」与 `resolve_tool` 的共同口径：poppler 在 `bin/poppler/pdftotext.exe`
-/// （exe 依赖同目录 DLL）、emule 在 `bin/emule/emule.exe`、whisper 在 `bin/whisper/whisper-cli.exe`
+/// （exe 依赖同目录 DLL）、whisper 在 `bin/whisper/whisper-cli.exe`
 /// （旧版叫 main.exe）、其余平铺在 `bin/<exe>`。
 pub fn managed_candidates(ctx: &Ctx, name: &str) -> Vec<PathBuf> {
     let bin = &ctx.dirs.bin;
@@ -1024,7 +982,6 @@ pub fn managed_candidates(ctx: &Ctx, name: &str) -> Vec<PathBuf> {
             bin.join("poppler").join(exe_name("pdftotext")),
             bin.join(exe_name("pdftotext")),
         ],
-        "emule" => vec![bin.join("emule").join(exe_name("emule")), bin.join(exe_name("emule"))],
         "imagemagick" => vec![
             bin.join("imagemagick").join(exe_name("magick")),
             bin.join(exe_name("magick")),
@@ -1365,11 +1322,6 @@ fn download_url(name: &str) -> Option<String> {
         }),
         "poppler" => Some(match os {
             "windows" => "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.09.0-0/Release-26.09.0-0.zip".into(),
-            _ => String::new(),
-        })
-        .filter(|s| !s.is_empty()),
-        "emule" => Some(match os {
-            "windows" => "https://github.com/irwir/eMule/releases/download/eMule_v0.72a-community/eMule0.72a.zip".into(),
             _ => String::new(),
         })
         .filter(|s| !s.is_empty()),
@@ -2013,7 +1965,7 @@ fn unzip_pick(zip_path: &Path, wanted: &[&str], dest_dir: &Path, flatten: bool) 
     Ok(extracted)
 }
 
-/// 整包解压到目录（poppler / eMule 这类 exe 依赖同目录 DLL 的场景）。
+/// 整包解压到目录（poppler 这类 exe 依赖同目录 DLL 的场景）。
 /// 会剥掉压缩包最外层的那一层目录（`Release-xx/Library/bin/` 之类），保持相对结构。
 /// 返回解压的文件数。
 fn unzip_all_into(zip_path: &Path, dest_dir: &Path) -> anyhow::Result<usize> {
@@ -2212,14 +2164,6 @@ pub fn install_tool(ctx: &Ctx, name: &str) -> anyhow::Result<ToolStatus> {
                     anyhow::bail!("压缩包中未找到 pdftotext（已解压 {got} 个文件）");
                 }
             }
-            "emule" => {
-                let dir = ctx.dirs.bin.join("emule");
-                std::fs::create_dir_all(&dir)?;
-                let got = unzip_all_into(&tmp, &dir)?;
-                if !dir.join(exe_name("emule")).is_file() {
-                    anyhow::bail!("压缩包中未找到 emule.exe（已解压 {got} 个文件）");
-                }
-            }
             "whisper" => {
                 let dir = ctx.dirs.bin.join("whisper");
                 let got = unzip_pick(&tmp, &[&exe_name("whisper-cli"), &exe_name("main")], &dir, true)?;
@@ -2269,7 +2213,7 @@ pub fn install_tool(ctx: &Ctx, name: &str) -> anyhow::Result<ToolStatus> {
 
     // 安装完成 → 用统一的受管候选表判定「是否真的装好了」。
     // 以前这里只把 yt-dlp / ffmpeg / whisper 三个映射成路径，其余工具（aria2 / pandoc /
-    // poppler / emule / imagemagick）装完一律 path=None → 必报「安装后仍无法运行」
+    // poppler / imagemagick）装完一律 path=None → 必报「安装后仍无法运行」
     // （真机上 aria2 文件已正确重装、能跑，界面却报失败）。
     let explicit = match name {
         "yt-dlp" => ctx.settings.ytdlp_path.as_ref(),
@@ -2302,7 +2246,6 @@ pub fn install_tool(ctx: &Ctx, name: &str) -> anyhow::Result<ToolStatus> {
         size_hint: size_hint.map(|s| s.into()),
         origin: Some(host_of(&url)),
         installable: installable(name),
-        probe: Some(probe_kind_str(name).into()),
     })
 }
 
@@ -2362,8 +2305,6 @@ fn model_status(dest: &Path, size_hint: &str, source: &str, origin: Option<&str>
         origin: origin.map(|s| s.to_string()),
         // 模型可下载（走 HuggingFace 多源链路），但不属于工具目录
         installable: true,
-        // 模型是文件，谈不上「启动探测」
-        probe: None,
     }
 }
 
@@ -3055,7 +2996,6 @@ mod probe_tests {
                 aria2: None,
                 pandoc: None,
                 poppler: None,
-                emule: None,
             },
             crate::models::AppSettings::default(),
         )
@@ -3068,40 +3008,7 @@ mod probe_tests {
         std::fs::write(p, b"stub").unwrap();
     }
 
-    /* ---------- C4：探活方式 ---------- */
-
-    /// 只有 GUI 程序（eMule）不启动探测；其余工具仍要启动一次拿版本号
-    #[test]
-    fn only_gui_tools_are_exists_only() {
-        assert_eq!(probe_kind("emule"), ProbeKind::ExistsOnly, "emule 是 GUI 程序，启动探测必然卡死");
-        assert_eq!(probe_kind_str("emule"), "exists");
-        for name in TOOL_ORDER {
-            if name == "emule" {
-                continue;
-            }
-            assert_eq!(probe_kind(name), ProbeKind::Exec, "{name} 仍应启动式探活");
-            assert_eq!(probe_kind_str(name), "exec", "{name}");
-        }
-    }
-
-    /// GUI 工具的探活：只核对文件存在，**不启动**进程 ——
-    /// 用「非可执行文件」当输入就能证明这一点（真去 exec 会失败，返回 false）
-    #[test]
-    fn exists_only_probe_never_executes() {
-        let dir = tmp_dir("exists-only");
-        let fake = dir.join("emule-not-a-program.txt");
-        std::fs::write(&fake, b"not an executable").unwrap();
-
-        let start = std::time::Instant::now();
-        assert_eq!(run_probe_with(&fake, "emule", Duration::from_millis(300)), (true, None));
-        assert!(start.elapsed() < Duration::from_secs(2), "只做文件核对，应当立刻返回");
-
-        // 对照组：同一个文件按「启动式探活」处理 → spawn 失败 → 不认为可用
-        assert_eq!(run_probe_with(&fake, "pandoc", Duration::from_millis(300)), (false, None));
-        // 文件不存在 → 明确不可用
-        assert_eq!(run_probe_with(&dir.join("nope.exe"), "emule", Duration::from_millis(300)), (false, None));
-        std::fs::remove_dir_all(&dir).ok();
-    }
+    /* ---------- C4：探活机制 ---------- */
 
     /// 会卡住的程序必须被超时强制结束（C4 的根因：GUI / 卡死程序让刷新永不返回）
     #[test]
@@ -3155,7 +3062,7 @@ mod probe_tests {
         assert!(!within_probe_budget(now - Duration::from_secs(30), Duration::from_secs(20)));
     }
 
-    /// 探活缓存必须换过名字：旧文件里存着错误结论（poppler 的 "No"、emule 的 ok=false），
+    /// 探活缓存必须换过名字：旧文件里存着错误结论（poppler 的 "No"），
     /// 而缓存键含 mtime、工具目录迁移又保留 mtime → 不换名字就会一直命中脏数据
     #[test]
     fn probe_cache_file_bumped_past_legacy() {
@@ -3244,13 +3151,6 @@ mod probe_tests {
                 ctx.dirs.bin.join("poppler").join(exe_name("pdftotext")),
                 ctx.dirs.bin.join(exe_name("pdftotext")),
             ]
-        );
-        assert!(managed_candidates(&ctx, "emule")[0]
-            .to_string_lossy()
-            .ends_with(&exe_name("emule")));
-        assert_eq!(
-            managed_candidates(&ctx, "emule")[0],
-            ctx.dirs.bin.join("emule").join(exe_name("emule"))
         );
         assert_eq!(
             managed_candidates(&ctx, "whisper"),

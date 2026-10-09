@@ -92,14 +92,17 @@ describe('主题：跟随系统的三条路', () => {
     stop()
   })
 
-  it('resolveTheme：system 走系统偏好，显式值原样返回', () => {
+  it('resolveTheme：跟随系统已移除 —— system / 未知值 / undefined 一律回退 dark', () => {
     const mq = stubMatchMedia(true)
+    // 工具函数仍如实反映系统偏好（但 resolveTheme 已不再跟随它）
     expect(systemPrefersDark()).toBe(true)
+    // 旧配置若存过 'system'：不报错，静默回退深色（与系统当前明暗无关）
     expect(resolveTheme('system')).toBe('dark')
-    mq.set(false)
-    expect(resolveTheme('system')).toBe('light')
+    mq.set(false) // 系统切到浅色也不跟随
+    expect(resolveTheme('system')).toBe('dark')
     expect(resolveTheme('light')).toBe('light')
     expect(resolveTheme('dark')).toBe('dark')
-    expect(resolveTheme(undefined)).toBe('light')
+    expect(resolveTheme(undefined)).toBe('dark') // 缺省值回退深色
+    expect(resolveTheme('nonsense')).toBe('dark') // 未知脏值一律回退深色
   })
 })

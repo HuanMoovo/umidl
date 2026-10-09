@@ -15,8 +15,6 @@ pub enum TaskStatus {
     Done,
     Error,
     Canceled,
-    /// ED2K：链接已交给受管 eMule 引擎接管（≠ 下载完成，进度在引擎里看）
-    HandedOff,
 }
 
 impl TaskStatus {
@@ -32,7 +30,6 @@ impl TaskStatus {
             TaskStatus::Done => "done",
             TaskStatus::Error => "error",
             TaskStatus::Canceled => "canceled",
-            TaskStatus::HandedOff => "handed_off",
         }
     }
     pub fn from_str(s: &str) -> Self {
@@ -47,7 +44,6 @@ impl TaskStatus {
             "done" => TaskStatus::Done,
             "error" => TaskStatus::Error,
             "canceled" => TaskStatus::Canceled,
-            "handed_off" => TaskStatus::HandedOff,
             _ => TaskStatus::Pending,
         }
     }
@@ -359,10 +355,6 @@ pub struct ToolStatus {
     /// 本平台是否能自动下载安装（false = 没有官方静态包，界面不显示「下载」按钮）
     #[serde(default)]
     pub installable: bool,
-    /// 探活方式：`exec`（启动一次问版本）| `exists`（GUI 程序只核对文件，不启动探测，
-    /// 版本号因此显示为「未知」）——界面据此解释「为什么没有版本号」
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub probe: Option<String>,
 }
 
 /// 单个工具的安装 / 校验结果：批量「下载所选」逐条返回，一条失败不影响其它工具
@@ -448,7 +440,7 @@ pub struct AppSettings {
     pub ffmpeg_path: Option<String>,
     pub whisper_path: Option<String>,
     pub whisper_model: String,
-    /// dark | light | system（跟随系统昼夜）
+    /// dark | light（「跟随系统」已移除：历史 'system' 值在读取时回退 dark）
     pub theme: String,
     /// 主题强调色
     #[serde(default = "default_accent")]
@@ -522,15 +514,9 @@ pub struct AppSettings {
     /// 开机自启动
     #[serde(default)]
     pub launch_at_login: bool,
-    /// 全部任务完成后关机
-    #[serde(default)]
-    pub shutdown_when_done: bool,
     /// 启动时检查更新
     #[serde(default = "default_true")]
     pub check_update_on_start: bool,
-    /// 更新清单地址（JSON：{"version":"x.y.z","url":"...","notes":"..."}）
-    #[serde(default)]
-    pub update_manifest_url: String,
     /* ---- 全局限速（令牌桶，1.4 新增） ---- */
     #[serde(default)]
     pub speed_limit_enabled: bool,
@@ -547,29 +533,6 @@ pub struct AppSettings {
     /// system | custom | off
     #[serde(default = "default_proxy_mode")]
     pub proxy_mode: String,
-    /* ---- 智能过滤（1.4 新增） ---- */
-    /// 扩展名黑名单（逗号分隔，命中即不下载）
-    #[serde(default)]
-    pub filter_ext_block: String,
-    /// 域名黑名单（逗号分隔，支持 *.example.com）
-    #[serde(default)]
-    pub filter_domain_block: String,
-    /// 域名白名单（非空时只允许名单内域名）
-    #[serde(default)]
-    pub filter_domain_allow: String,
-    /// 最小文件大小（MB；0 = 不过滤）
-    #[serde(default)]
-    pub filter_min_size_mb: i64,
-    /* ---- 浏览器捕获（1.4 新增） ---- */
-    /// 本地捕获端口；0 = 关闭
-    #[serde(default = "default_capture_port")]
-    pub capture_port: u16,
-    /// 捕获令牌（空 = 不校验）
-    #[serde(default)]
-    pub capture_token: String,
-    /// 捕获到的链接是否自动入队（false = 仅在界面提示）
-    #[serde(default = "default_true")]
-    pub capture_auto_queue: bool,
     /* ---- 多线程 / 连接数（1.6 新增，全部带限幅） ---- */
     /// aria2 每服务器连接数（--max-connection-per-server，1..=16）
     #[serde(default = "default_aria2_connections", deserialize_with = "clamp_aria2_connections")]
@@ -589,6 +552,16 @@ pub struct AppSettings {
     /// 非法值（相对路径 / 乱码）不会被信任：运行时统一回落到默认目录（见 tools::effective_tool_dir）。
     #[serde(default)]
     pub tool_dir: String,
+    /* ---- 界面模式 / 外观风格（1.10 新增） ---- */
+    /// 界面模式：simple 简单（默认，只显示常用项） | advanced 高级（全部可见）
+    #[serde(default = "default_ui_mode")]
+    pub ui_mode: String,
+    /// 外观风格：glass 玻璃拟态（默认） | mono 黑白简约（纯黑 / 纯白、去模糊）
+    #[serde(default = "default_appearance_style")]
+    pub appearance_style: String,
+    /// 自定义渐变强调色 "起色,止色"（两个 #RRGGBB；空 = 不用渐变）
+    #[serde(default)]
+    pub accent_gradient: String,
 }
 
 /* ---- 多线程 / 连接数：取值范围（UI 与调度共用，改动只需改这里） ---- */
@@ -656,9 +629,6 @@ fn default_playlist_mode() -> String {
 fn default_proxy_mode() -> String {
     "system".into()
 }
-fn default_capture_port() -> u16 {
-    6970
-}
 
 fn default_accent() -> String {
     "violet".into()
@@ -687,6 +657,12 @@ fn default_true() -> bool {
 fn default_anim_quality() -> String {
     "medium".into()
 }
+fn default_ui_mode() -> String {
+    "simple".into()
+}
+fn default_appearance_style() -> String {
+    "glass".into()
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -696,7 +672,7 @@ impl Default for AppSettings {
             ffmpeg_path: None,
             whisper_path: None,
             whisper_model: "base".into(),
-            theme: "system".into(),
+            theme: "dark".into(),
             accent: default_accent(),
             ui_language: default_ui_language(),
             custom_logo: None,
@@ -725,27 +701,21 @@ impl Default for AppSettings {
             queue_layout: default_queue_layout(),
             accent_custom: String::new(),
             launch_at_login: false,
-            shutdown_when_done: false,
             check_update_on_start: true,
-            update_manifest_url: String::new(),
             speed_limit_enabled: false,
             speed_limit_kb: 0,
             engine: default_engine(),
             playlist_mode: default_playlist_mode(),
             proxy_mode: default_proxy_mode(),
-            filter_ext_block: String::new(),
-            filter_domain_block: String::new(),
-            filter_domain_allow: String::new(),
-            filter_min_size_mb: 0,
-            capture_port: default_capture_port(),
-            capture_token: String::new(),
-            capture_auto_queue: true,
             aria2_connections: default_aria2_connections(),
             aria2_split: default_aria2_split(),
             aria2_min_split_mb: default_aria2_min_split_mb(),
             ytdlp_concurrency: default_ytdlp_concurrency(),
             // 工具目录默认空 = 使用「数据目录/bin」（见 tools::effective_tool_dir）
             tool_dir: String::new(),
+            ui_mode: default_ui_mode(),
+            appearance_style: default_appearance_style(),
+            accent_gradient: String::new(),
         }
     }
 }
@@ -845,14 +815,52 @@ mod tests {
         assert_eq!(back.ytdlp_concurrency, 5);
     }
 
-    /// BUG-14：ED2K 用独立终态 handed_off，不再复用 done
+    /// 界面模式 / 外观风格 / 自定义渐变：老配置缺字段取默认（simple / glass / 空），显式值原样往返
     #[test]
-    fn handed_off_status_roundtrip() {
-        assert_eq!(TaskStatus::HandedOff.as_str(), "handed_off");
-        assert_eq!(TaskStatus::from_str("handed_off"), TaskStatus::HandedOff);
-        assert_ne!(TaskStatus::HandedOff, TaskStatus::Done, "必须与「已完成」区分开");
-        assert_eq!(serde_json::to_string(&TaskStatus::HandedOff).unwrap(), "\"handed_off\"");
-        // 老库里出现未知状态时仍回落 pending（不 panic、不丢任务）
+    fn settings_ui_mode_and_appearance_defaults() {
+        // 老配置（完全没有这三个字段）→ 默认 simple / glass / 空渐变
+        let s: AppSettings = serde_json::from_str(r#"{"download_dir":"D:\\Videos"}"#).unwrap();
+        assert_eq!(s.ui_mode, "simple", "界面模式默认 simple");
+        assert_eq!(s.appearance_style, "glass", "外观风格默认 glass");
+        assert_eq!(s.accent_gradient, "", "渐变默认空串");
+
+        // 完全空的 json → 走 Default，与逐字段默认值一致
+        let d = AppSettings::default();
+        assert_eq!(d.ui_mode, "simple");
+        assert_eq!(d.appearance_style, "glass");
+        assert_eq!(d.accent_gradient, "");
+
+        // 显式值往返不丢
+        let s: AppSettings =
+            serde_json::from_str(r##"{"ui_mode":"advanced","appearance_style":"mono","accent_gradient":"#7c4dff,#22d3ee"}"##)
+                .unwrap();
+        assert_eq!(s.ui_mode, "advanced");
+        assert_eq!(s.appearance_style, "mono");
+        assert_eq!(s.accent_gradient, "#7c4dff,#22d3ee");
+        let back: AppSettings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(
+            (back.ui_mode, back.appearance_style, back.accent_gradient),
+            ("advanced".into(), "mono".into(), "#7c4dff,#22d3ee".into())
+        );
+    }
+
+    /// 任务状态字符串往返；老库里出现未知状态时仍回落 pending（不 panic、不丢任务）
+    #[test]
+    fn status_roundtrip_and_unknown_fallback() {
+        for s in [
+            TaskStatus::Pending,
+            TaskStatus::Parsing,
+            TaskStatus::Downloading,
+            TaskStatus::Paused,
+            TaskStatus::Converting,
+            TaskStatus::Extracting,
+            TaskStatus::Transcribing,
+            TaskStatus::Done,
+            TaskStatus::Error,
+            TaskStatus::Canceled,
+        ] {
+            assert_eq!(TaskStatus::from_str(s.as_str()), s);
+        }
         assert_eq!(TaskStatus::from_str("weird-future-state"), TaskStatus::Pending);
     }
 }

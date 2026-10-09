@@ -8,14 +8,13 @@
 | # | 需求 | 状态 | 说明 |
 |---|------|------|------|
 | 1 | Tauri 2 + Rust Tokio + 多连接动态分段，托管外部工具、不污染 PATH | ✅ | 工具全部下载到 `%APPDATA%/umi-downloader/bin`，以**绝对路径**调用，从不写 PATH；新增 aria2c 托管项（真机下载 2.4 MB 实测 `CN:3` 多连接） |
-| 2 | 分P/合集、直链、种子、HTTP/HTTPS/FTP/BT 磁力、HLS/DASH、分段并行、断点续传 | ✅ | HTTP/HTTPS/FTP/BT/磁力/HLS/DASH 全通（aria2c + yt-dlp 双引擎，可手动指定）；**ED2K 已实现**：ed2k 链接解析（hash / 大小 / 文件名 / AICH / 源，逐段错误定位）+ **eMule 0.72a 社区版引擎托管接管**（受管目录 + 预置 `config/preferences.ini` 便携模式 + WebServer 就绪后 HTTP 远程加链，并回读传输列表核对 hash；冷启动丢弃 argv 链接的引擎行为已实测确认并绕开） |
+| 2 | 分P/合集、直链、种子、HTTP/HTTPS/FTP/BT 磁力、HLS/DASH、分段并行、断点续传 | ✅ | HTTP/HTTPS/FTP/BT/磁力/HLS/DASH 全通（aria2c + yt-dlp 双引擎，可手动指定） |
 | 3 | 背景粒子：圆形 / 棱形 / 正方形三选一 | ✅ | `particle_shape` 设置项 + 「外观 → 动画与性能」选择器 + 6 个画布指令级回归测试 |
 | 4 | 转换支持图片/文档/音频 + 自动识别；队列卡片/表格双布局 | ✅ | 音频 ✅、图片 ✅（png/jpg/webp/bmp/tiff/ico 走 image2 分支，已用真实 ffmpeg 验证）、自动识别 ✅；**文档 ✅**（原生纯 Rust 解析 docx / xlsx / pptx / odt / ods / odp → txt / md / html / csv，pandoc 富格式互转 docx·odt·rtf·epub·html·md，poppler 抽取 PDF 文本与页面）；队列双布局 ✅（卡片 / 详细表格，含表头吸顶与持久化） |
-| 5 | 自启动、自定义强调色、代理、导出日志、更新设置、完成后关机 | ✅ | 六项全部实现为设置界面：自启动（真实注册表 v8 项）、自定义强调色（含浅底自动加深 + 主题切换重算 + 启动即生效）、代理、日志导出（日志 + 环境摘要）、更新（清单地址 + 版本比对）、全部完成后关机（60 秒倒计时 + 可取消） |
+| 5 | 自启动、自定义强调色、代理、导出日志、更新检查 | ✅ | 五项全部实现为设置界面：自启动（真实注册表 v8 项）、自定义强调色（含浅底自动加深 + 主题切换重算 + 启动即生效）、代理、日志导出（日志 + 环境摘要）、更新（启动时检查更新 + 版本比对） |
 | 6 | JavaScript 插件沙箱 + 链接解析器 + 通知钩子 + 插件市场（内容寻址校验） | ✅ | **rquickjs（QuickJS）沙箱**：16 MB 内存上限 + 512 KB 栈上限 + 200 ms 墙钟时间预算（interrupt handler 真中断 `while(true)`）；不注入任何宿主对象（`require`/`process`/`fetch`/`XMLHttpRequest` 全部 undefined，恶意插件被隔离且宿主存活），只暴露白名单 `umi.*`；**链接解析器**（`umi.registerResolver`，参与路由判定）、**通知钩子与命令式重试**（`download:error` → `umi.retry`，自带次数上限不无限重试）、**插件市场**：内置两个可运行示例 + 以文件 sha256 做内容寻址校验，**改一个字节即拒绝安装** |
-| 7 | 令牌桶全局限速（可开关） | ✅ | `ratelimit.rs` 纯数学内核（19 个 Rust 单测覆盖）+ 全局单例；yt-dlp `--limit-rate`、aria2 `--max-overall-download-limit`、应用自身请求三处统一受控；**实机限速测速在 `verify_v14.py` 里量真实速率** |
-| 8 | 一键拦截自动捕获下载请求 / 右键手动发送 | ✅ | 本地回环接口 `127.0.0.1:6970`（`/ping` 握手、`/capture?url=…` 入队、可选令牌、CORS），**捕获→过滤→真实入队→真实下载全链路已接通**，界面即时提示；浏览器扩展本体可另行开发 |
-| 9 | 按扩展名 / 域名黑白名单 / 最小文件大小过滤 | ✅ | `filters.rs`（域名支持 `*.example.com` 通配与子域命中、扩展名忽略大小写与前导点）；入队前 + 探测后两道拦截，界面「链接体验」实时给出结论 |
+| 7 | 令牌桶全局限速（可开关） | ✅ | `ratelimit.rs` 纯数学内核（19 个 Rust 单测覆盖）+ 全局单例；yt-dlp `--limit-rate`、aria2 `--max-overall-download-limit`、应用自身请求三处统一受控；**限速实测（当时的验证脚本已随仓库精简移除，结论文档保留）** |
+| 8 · 9 | 浏览器请求接管与链接筛选（原第 8 / 9 项需求） | ⛔ | 1.8.11 起产品收窄为「下载 / 转换 / 字幕」三核心，本两项连同相应外围功能一并移除，不再实现 |
 | 10 | 全平台版本 | 🟡 | `.github/workflows/release.yml` 覆盖 Windows / macOS(arm64+x64) / Linux；**本机只能编译并验证 Windows**，其余平台产物需在 CI 上出（macOS/Linux 的 aria2 无官方静态包，已在报错里给出 brew/apt 指引） |
 
 ## 详述
@@ -35,7 +34,6 @@
 | HLS (.m3u8) / DASH (.mpd) | yt-dlp + ffmpeg 合并 | ✅ |
 | FTP/FTPS | aria2c | ✅ |
 | BitTorrent (.torrent) / 磁力 | aria2c（DHT/LPD/16 分段） | ✅ |
-| ED2K | — | ⛔ 无维护良好的开源引擎，调用时给出明确错误 |
 | 分P / 合集 | yt-dlp（`playlist_mode`） | ✅ |
 
 断点续传：aria2c `--continue=true`（断电后重启继续）；yt-dlp `--continue`。
@@ -51,19 +49,6 @@
 
 要做成"可验证"的形态，至少需要：嵌入 JS 运行时（`boa_engine` 纯 Rust 或 `deno_core`）→ 能力白名单 API（只暴露 `resolve(url)`、`onEvent(name, cb)`）→ 插件清单（`manifest.json` + 入口文件 + sha256）→ 内容寻址目录与签名校验 → 插件市场索引。工作量约等于当前 1.4 全部内容。
 
-### 8. 浏览器捕获用法
-
-```bash
-# 命令行手动推送
-curl "http://127.0.0.1:6970/capture?url=https%3A%2F%2Fexample.com%2Fvideo.mp4"
-# 带令牌
-curl -H "X-Umidl-Token: <令牌>" "http://127.0.0.1:6970/capture?url=…"
-# 握手
-curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.0","capture":true}
-```
-
-浏览器侧：任意扩展或书签脚本向该地址发 GET/POST 即可（CORS 已放行，右击链接 → 用脚本发送 = 手动推送）。
-
 ### 10. 全平台构建
 
 - 本机：Windows x64（NSIS 安装包，已验证）。
@@ -76,15 +61,15 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 |------|------|
 | `npx vue-tsc --noEmit` | 0 错误 |
 | `npx vitest run` | 60 / 60 通过（含粒子三形状 6 条、队列布局 5 条） |
-| `cargo test --lib` | 20 / 20 通过（令牌桶、过滤器、日志时区、捕获解析、aria2 参数与进度解析、完成行路径提取） |
-| i18n 一致性 | 四语言各 457 条，key 集合完全一致（`scripts/i18n_missing.py`） |
-| `scripts/verify_v14.py` | **29 / 29 通过** |
+| `cargo test --lib` | 20 / 20 通过（令牌桶、日志时区、aria2 参数与进度解析、完成行路径提取） |
+| i18n 一致性 | 四语言各 457 条，key 集合完全一致（`scripts/check_i18n_catalog.py`，现行门禁） |
+| 1.4 验证套件（已随精简移除） | **29 / 29 通过** |
 | 安装包 | `Umidl_1.4.0_x64-setup.exe`（3.87 MiB） |
 
 验收里几条**真证据**（不是"看到参数就通过"）：
 
-- **限速**：同一文件未限速时实测 2.6 MiB/s；开 300 KB/s 后两次实测 295 / 392 KB/s（慢约 7 倍）。⚠️ 实测值按"捕获到落库"的墙钟估算、含 2 秒轮询粒度，所以可能略高于标称上限，但量级上确实被压住了。
-- **捕获 → 下载**：`curl` 推 2.4 MB 直链 → 任务真实入队 → 落盘 **2,475,379 字节**，与独立 `curl` 下载的字节数**完全一致**。
+- **限速**：同一文件未限速时实测 2.6 MiB/s；开 300 KB/s 后两次实测 295 / 392 KB/s（慢约 7 倍）。⚠️ 实测值按「入队到落库」的墙钟估算、含 2 秒轮询粒度，所以可能略高于标称上限，但量级上确实被压住了。
+- **下载落盘**：2.4 MB 直链任务真实入队 → 落盘 **2,475,379 字节**，与独立 `curl` 下载的字节数**完全一致**。
 - **分段并行**：真实 aria2 输出 `CN:3`（16 连接上限、1M 最小分片下按文件大小自动决定实际连接数）。
 - **断点续传**：同命令复跑报 `OK / 0B/s`，不重下。
 - **自启动**：真实写入 `HKCU\...\Run` 注册表项并可关闭。
@@ -97,12 +82,12 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 |------|------|
 | `npx vue-tsc --noEmit` | 0 错误 |
 | `npx vitest run` | 60 / 60 通过 |
-| `cargo test --lib` | **101 / 101 通过**（原有 20 + 文档 33 + 插件 13 + ED2K 35） |
+| `cargo test --lib` | **101 / 101 通过** |
 | i18n 一致性 | 四语言各 544 条，key 集合完全一致、运行时文案零缺失 |
-| `scripts/verify_v15.py` | **38 / 38 通过** |
+| 1.5 验证套件（已随精简移除） | **38 / 38 通过** |
 | 安装包 | `Umidl_1.5.0_x64-setup.exe`（4.36 MiB） |
 
-1.5 新增三项功能各自的**真证据**：
+1.5 新增两项功能（文档转换 / 插件沙箱）各自的**真证据**：
 
 **文档转换（第 4 项补齐）**
 - 真实 `docx → md`：产出 95 字符，首行 `# 文档转换验收标题`（pandoc 生成的真 docx）
@@ -110,12 +95,6 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 - 真实 `xlsx → csv`：产出 `项目,数值` / `令牌桶,300 KB/s`（**纯 Rust 原生解析**，不经任何外部程序）
 - `probe_document` 对三种真文件都识别出正确元信息（页数 / 工作表 / 字符数）
 - 实测揪出的真 bug：部分 `pdftotext` 构建（Git for Windows 自带）在省略输出文件时**什么都不写**，必须显式传 `-`，否则抽取静默返回空串
-
-**ED2K（第 2 项补齐）**
-- 解析：hash / 文件名 / 大小 / AICH / 源；非法链接报"大小段不是数字：`notanumber`（应为字节数，例如 734003200）"
-- 引擎接管：冷启动 eMule（pid 13456）→ WebServer `127.0.0.1:4711` 就绪 → HTTP 远程加链 → 引擎回执 `result="OK"` → **回读传输列表确认 hash 在列**（`verified: true`）
-- 队列联动：ed2k 链接的路由判定为 `ed2k`（不再落到 yt-dlp/aria2），任务卡写回链接里的真实文件名与大小
-- 实测确认的引擎行为（写进了代码注释）：eMule 0.72a **不支持 `-c` 指定配置目录**（源码 `ProcessCommandline` 只认 `-ignoreinstances` / `-AutoStart`），改用"程序目录便携模式"；**冷启动会丢弃 argv 里的链接**，必须等 WebServer 就绪后走 HTTP 加链
 
 **插件沙箱（第 6 项补齐）**
 - 沙箱自述：`quickjs 0.16.2`、内存上限 16 MB、单脚本时间预算 200 ms
@@ -131,7 +110,7 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 | 1 | 转换模块整理通用功能 + 格式类型选项，主流音/视/图/文档格式 60 种以上 | ✅ | `convert_formats()` 真机探测 **88 种**：视频 22 / 音频 21 / 图片 22 / 文档 23（可用性来自本机 ffmpeg / pandoc / poppler 真实能力，13 种标为不可用并置灰；1.8.8 起目录收敛为 80 种：视频 22 / 音频 20 / 图片 20 / 文档 18，本机全部可用）；转换页顶部显示"共 88 种格式"与四类计数，类型分段（全部/视频/音频/图片/文档）可切换，选不同类型只显示对应参数面板 |
 | 2 | 插件模块移动到设置里 | ✅ | 侧边栏只剩 首页/下载/转换/字幕/设置；`#/plugins` 重定向到 `#/settings?tab=plugins`（旧链接不死）；设置页第 7 个页签"插件"渲染沙箱信息/已装插件/市场/事件日志，既有开关·测试·安装逻辑原样可用 |
 | 3 | 字幕模块导出语言可选多个 | ✅ | 「识别语言（可多选）」芯片组；选 3 个语言 → 按钮"开始转写（3 个任务）"→ 真实发起 3 次 `start_subtitle`；再开「翻译成英文」→ 6 个任务（每语言额外一份英文）；队列卡片逐条标注语言 |
-| 4 | 视频下载支持多链接导入与 txt 导入自动下载 | ✅ | 新增 `enqueue_links(text, output_dir)` 后端命令 + 下载页批量导入面板：5 行文本（含注释/空行/重复/被过滤项）→ 识别 4 条/去重 3 条 → 后端返回 `added=2 skipped=1`，任务真实下载完成 **2,475,379 字节**；txt 导入走真实文件读取并回填文本框；后端错误原文直接展示 |
+| 4 | 视频下载支持多链接导入与 txt 导入自动下载 | ✅ | 新增 `enqueue_links(text, output_dir)` 后端命令 + 下载页批量导入面板：5 行文本（含注释/空行/重复/无法入队项）→ 识别 4 条/去重 3 条 → 后端返回 `added=2 skipped=1`，任务真实下载完成 **2,475,379 字节**；txt 导入走真实文件读取并回填文本框；后端错误原文直接展示 |
 | 5 | 设置里可调整多线程数 | ✅ | 新增 5 个可调参数：同时任务数 `concurrency`(1-8)、aria2 单服务器连接数 `aria2_connections`(1-16)、分段数 `aria2_split`(1-16)、最小分片 MB `aria2_min_split_mb`(1-64)、yt-dlp 分片并发 `ytdlp_concurrency`(1-16)；真实写入 aria2 `--max-connection-per-server/--split/--min-split-size` 与 yt-dlp `--concurrent-fragments`；越界值实测被限幅（999→16、0→1、99→8） |
 
 ### 1.6.0 验收证据
@@ -142,7 +121,7 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 | `npx vue-tsc --noEmit` | 0 错误 |
 | `npx vitest run` | **67 / 67**（1.5 的 60 + 批量导入解析 7） |
 | i18n 一致性 | 四语言各 604 条，key 完全一致、运行时零缺失 |
-| `scripts/verify_v16.py` | **25 / 25** |
+| 1.6 验证套件（已随精简移除） | **25 / 25** |
 | 安装包 | `Umidl_1.6.0_x64-setup.exe` |
 
 本轮修掉的**真 bug**：`enqueue_links` 最初按"空白+逗号"切分整段文本，导致注释行 `# 这是一行注释，应被跳过` 被逗号切断、后半截 `应被跳过` 被当成链接入队（前端解析器当时已在自己的注释里标注了这个后端问题）。改为**按整行**忽略注释、仅在行内切词后，同一份输入从 `added=4`（3 条垃圾链接）变为 `added=2 skipped=1`。
@@ -151,7 +130,6 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 
 | 需求 | 结果 | 实测证据 |
 |------|------|----------|
-| ED2K 电驴引擎整合到下载里 | ✅ | ED2K 面板抽成 `src/components/Ed2kPanel.vue` 并嵌入下载页（`SettingsEd2k.vue` 已删除）：引擎状态/一键安装（带 `tool://progress` 进度）/粘贴即时解析（文件名·大小·源数·AICH）/「交给引擎下载」/链接类型即时提示。实测：粘 ed2k 链接出现「检测到 ED2K 链接 · 将由 eMule 引擎接管」（粘 https 不出现），交接走到 `handoff: http` + 引擎回执 `result="OK"`；单链接按钮对 ed2k 也用，任务卡显示「ED2K · 已交由引擎接管」与链接里的真实文件名/大小；设置 → 系统与集成 **页面上 ED2K/eMule 文本为 0**，只剩 浏览器捕获 / 系统与电源 / 更新 / 诊断 四张卡 |
 | 转换格式统一 UI + 自定义选类型/目标格式，减少页面占用 | ✅ | 转换页由 4 张大卡收敛为 **2 张**（统一流程卡 + 队列），页面高度 **2964 → 1071 px**（有任务时 1194）；一套「文件区 → 单一格式选择器（类型芯片 + 搜索 + 网格）→ 按类型显隐的参数区 → 一行引擎状态条 → 队列」；实测 `[data-role=format-grid]=1`、历史区块 `doc-capability/format-catalog/param-panel = 0`；类型筛选与后端目录逐类一致：全部 88 / 视频 22 / 音频 21 / 图片 22 / 文档 23（后端 22/21/22/23）；搜索 `mp4` 在视频类下 22 → 2 条；全部视图 13 项、音频视图 3 项按真实引擎能力置灰 |
 
 ### 1.7.0 验收证据
@@ -162,7 +140,7 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 | `npx vue-tsc --noEmit` | 0 错误 |
 | `npx vitest run` | 67 / 67 |
 | i18n 一致性 | 四语言各 622 条，key 完全一致、运行时零缺失 |
-| `scripts/verify_v17.py` | **22 / 22** |
+| 1.7 验证套件（已随精简移除） | **22 / 22** |
 | 安装包 | `Umidl_1.7.0_x64-setup.exe`（4.39 MiB） |
 
 ## 1.8.0 新增（格式全面可用 / UI 收敛 / bug 修复轮）
@@ -184,10 +162,9 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 | BUG-05 | P2 | 并发数设置形同虚设（判断成立后是空注释块） | 实现真排队：超并发置 `pending`（界面「排队中」），槽位释放自动唤醒；真机 6 个任务 → `{downloading:3, pending:3}`、aria2c 恰 3 个、释放后 pending 3→2 |
 | BUG-03 | P2 | 退出不回收引擎子进程（实测 4 个 aria2c 变孤儿、退出后仍在写盘） | 退出路径遍历 `state.pids` 执行 `kill_tree` + 启动清扫父进程已死的受管引擎；真机 `aria2_after=[]` |
 | BUG-04 | P2 | 取消下载最终显示“已暂停”并残留 `.aria2` | 用 `StopIntent` 区分 pause/cancel；取消 → `canceled` 并清理控制文件与半成品 |
-| BUG-06 | P2（安全） | 捕获端口默认无令牌 + 响应带 `ACAO: *` → 任意网站可越站入队（实测 `Origin: https://evil.example` 真入队） | 强制令牌（首启自动生成 32 位 hex）、去掉全部 CORS 头、校验 Origin/Referer；真机 evil Origin → **403 且不入队**，带令牌 → 200 queued |
 | BUG-07 | P2 | 粘贴 100 万行让主线程冻结 10 秒（另有约 403 秒的极端复现） | 512KB 上限（按行截断+提示）、`@paste` 拦截（36.9MB 不进 DOM）、分块解析；真机 10,034ms → **243.8ms** |
 | BUG-08 | P2 | 目标路径 >260 字符下载失败，且只看到 aria2 的 `Download aborted`，真因（errorCode=18）被丢弃 | 入队预检（>259 直接拒绝并说明）+ 错误展示保留 errorCode/Exception 行 |
-| BUG-10/11/12/13/14 | P3 | 限速器锁中毒会连锁 panic；捕获端口冲突无界面提示；`/capture` 恒回 `queued`；字幕失败残留产物无指引；ED2K 入队即显示“完成/100%” | 分别：安全取锁 + 中毒锁单测；设置页可见警告与「重启/换端口」；按真实结果返回 queued/skipped/blocked/rejected；失败时清无效产物、保留有效产物并回写路径；新增 `handed_off` 状态（不再复用 done），四语言与卡片映射同步 |
+| BUG-10/13 | P3 | 限速器锁中毒会连锁 panic；字幕失败残留产物无指引 | 分别：安全取锁 + 中毒锁单测；失败时清无效产物、保留有效产物并回写路径 |
 
 ### 1.8.1（转换页不再出现“不可用”）
 
@@ -195,13 +172,13 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 
 ### 1.8.1（下载队列三修 + 转换模块移除预览）
 
-| 问题（用户原话） | 根因 | 修复 | 真机证据（`scripts/verify_dqfix.py`，同一 URL 前后各一次） |
+| 问题（用户原话） | 根因 | 修复 | 真机证据（同一 URL 前后各一次） |
 |------|------|------|------|
 | 完成任务报「文件已丢失」、打不开/不能预览文件 | `download://update` 事件直接发任务对象，`file_exists` 是创建时的初值 `false`；前端 upsert 后把「文件还在」覆盖成「已丢失」，卡片/表格据此隐藏「打开文件 / 在文件夹中显示」 | 新增 `lib.rs::event_payload()`，所有事件出口（进度 tick / 完成 / 暂停 / 取消 / 补封面）统一标注 `file_exists`，口径与 `list_downloads` 一致 | 修复前：文件在盘上 2.72 MB 却显示「文件已丢失」，行按钮仅 `['预览','删除记录']`；修复后：同一行 `['打开文件','在文件夹中显示','预览','删除记录']`，无「文件已丢失」。补封面事件单独复验：历史任务补封面后按钮仍在 |
 | 同一条链接入队一次出现两条一样的 | 后端在命令返回前已 emit 过 `download://update`（事件先 upsert 一条），视图随后又对命令返回值 `unshift` 一次，同一 id 出现两份，其中一份停在「解析中 0%」 | 新增 `services/taskList.ts::enqueueOnce()` + store 的 `enqueueDownload/Convert/Subtitle`，缺行才插入（下载/转换/字幕三处入队全部改走该入口） | 修复前：点一次「开始下载」→ DB 新增 1 行、界面 2 行（一条 100% 已完成 + 一条 0% 解析中）；修复后：DB 新增 1 行、界面 1 行，卡片布局任务卡 1 张、队列计数 = DB 行数 |
 | 格式转换部分取消预览功能 | 转换队列卡的「预览」是第二次点击产物文件（与「打开文件」重复），用户要求移除 | `TaskCard` 新增 `canPreview` 开关（false 时预览按钮、缩略图点击与预览光标一并消失）；Converter 传 `:can-preview="false"` 并删掉 `previewTask()`；四语言包同步删除 `该任务还没有产物` / `产物文件已被移动或删除` 两条文案（655 条 × 4，key 一致） | 修复前：转换队列 15 张卡按钮均为 `['打开文件','在文件夹中显示','预览','删除记录']`；修复后：全部为 `['打开文件','在文件夹中显示','删除记录']`，`Converter.queue.test.ts` 断言「不该再有预览按钮」 |
 
-门禁（修复后同一次运行）：`cargo test --lib` 154/154（+4 ignored，新增 `event_payload_carries_real_file_exists`）· `npx vue-tsc --noEmit` 0 错误 · `npx vitest run` 11 文件 / 99 例 · i18n 四语言各 655 条、key 完全一致 · `scripts/verify_dqfix.py after` 19/19 通过。
+门禁（修复后同一次运行）：`cargo test --lib` 154/154（+4 ignored，新增 `event_payload_carries_real_file_exists`）· `npx vue-tsc --noEmit` 0 错误 · `npx vitest run` 11 文件 / 99 例 · i18n 四语言各 655 条、key 完全一致 · 修复后的 19 项检查通过。
 
 ### 1.8.5（字幕「未生成字幕文件」真凶：whisper-cli 的 ANSI 路径 + 默认模型未下载）
 
@@ -219,15 +196,13 @@ curl http://127.0.0.1:6970/ping   # → {"ok":true,"app":"Umidl","version":"1.4.
 | `npx vue-tsc --noEmit` | 0 错误 |
 | `npx vitest run` | 87 / 87 |
 | i18n 一致性 | 四语言各 655 条，key 完全一致、运行时零缺失 |
-| `scripts/verify_v18.py` | 全部通过（格式 80/88 可用、PSD 真产物、队列预览、字幕真出 SRT、排队/取消/删除/长路径/ED2K 状态、20 万行粘贴、越站入队拒绝、退出清扫、UI 收敛回归） |
+| 1.8 验证套件（已随精简移除） | 全部通过（格式 80/88 可用、PSD 真产物、队列预览、字幕真出 SRT、排队/取消/删除/长路径、20 万行粘贴、退出清扫、UI 收敛回归） |
 | 安装包 | `Umidl_1.8.0_x64-setup.exe`（4.43 MiB） |
 | bug 报告 | `docs/BUG_SWEEP_1.8.md` |
 
 ## 仍未做完的部分（诚实清单）
 
-1. **mlDonkey 分支未实测**（ED2K 的备用引擎）——本机没有可用二进制，代码与返回里都显式标注"未实测"，接入点按官方 Browser Integration 文档实现。
-2. **浏览器扩展本体**（第 8 项）——捕获接口、过滤、真实入队、插件重试钩子都已就绪，扩展 UI 尚未开发（可用插件层写）。
-3. **随包自带的 macOS / Linux 安装包**（第 10 项）——`.github/workflows/release.yml` 已覆盖三平台，但**只在本机验证过 Windows**；macOS/Linux 的 aria2 无官方静态包，安装引导已给出 brew/apt 指引。
-4. **插件市场的远端分发**——当前是内置市场（首次运行生成 + sha256 真实计算），远端索引拉取与签名发布链路尚未接。
-5. **文档格式的边界**——扫描件 PDF 的 OCR、加密 PDF、宏文档（docm/xlsm）的执行语义不在支持范围内（前者需 OCR 引擎，后者按安全策略不执行宏）。
-6. **一处编译告警**——`plugins.rs` 里的 `eval_text` 目前未被调用（保留给后续"插件调试台"），`cargo build` 会报一条 dead_code 警告。
+1. **随包自带的 macOS / Linux 安装包**（第 10 项）——`.github/workflows/release.yml` 已覆盖三平台，但**只在本机验证过 Windows**；macOS/Linux 的 aria2 无官方静态包，安装引导已给出 brew/apt 指引。
+2. **插件市场的远端分发**——当前是内置市场（首次运行生成 + sha256 真实计算），远端索引拉取与签名发布链路尚未接。
+3. **文档格式的边界**——扫描件 PDF 的 OCR、加密 PDF、宏文档（docm/xlsm）的执行语义不在支持范围内（前者需 OCR 引擎，后者按安全策略不执行宏）。
+4. **一处编译告警**——`plugins.rs` 里的 `eval_text` 目前未被调用（保留给后续"插件调试台"），`cargo build` 会报一条 dead_code 警告。

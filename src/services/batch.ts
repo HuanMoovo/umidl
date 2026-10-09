@@ -4,9 +4,9 @@
  * 为什么单独一个模块：`src/services/ipc.ts` 由另一条线维护（本任务禁改），
  * 这里自带一个等价的 `call()` 封装 `enqueue_links` 与 `read_text_file`。
  *
- * 关键约定：链接是否合法、是否命中过滤规则（扩展名 / 域名黑白名单 / 最小体积）、
- * 是否重复，全部由后端判定；前端只做「识别 / 去重计数」的展示，
- * 绝不自行丢弃任何链接（被拦截的链接也要如实展示后端给出的统计）。
+ * 关键约定：链接是否合法、是否重复，全部由后端判定；
+ * 前端只做「识别 / 去重计数」的展示，绝不自行丢弃任何链接
+ * （被跳过的链接也要如实展示后端给出的统计）。
  */
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './ipc'
@@ -16,14 +16,10 @@ import type { DownloadTask } from '@/types'
 export interface EnqueueResult {
   /** 成功入队条数 */
   added: number
-  /** 命中过滤规则被拦截条数 */
-  blocked: number
   /** 重复 / 已在下载中 / 入队失败而跳过条数 */
   skipped: number
   /** 本次新建的任务对象（与下载队列同构） */
   tasks: DownloadTask[]
-  /** 被拦截的链接及原因（后端原文） */
-  blocked_reasons?: string[]
   /** 入队失败的链接及错误（后端原文） */
   errors?: string[]
 }
@@ -137,9 +133,9 @@ export function parseChunk(
  *
  * 与后端的差异（有意为之）：后端 enqueue_links 先把整段文本按同一批分隔符切词，
  * 再逐词判注释，因此 `# 注释 文字` 这类「注释符 + 空格 + 文字」在后端会多出一个
- * 待处理词（随后被过滤规则拦下或入队失败）。前端计数按「整行注释」处理，
+ * 待处理词（随后被入队失败跳过）。前端计数按「整行注释」处理，
  * 保证“识别到 N 条链接”是用户真正粘进来的链接数；入队结果永远取后端返回值，
- * 所以拦截 / 跳过条数始终以引擎为准。发送给后端的文本原样不动，前端不做任何过滤。
+ * 所以跳过条数始终以引擎为准。发送给后端的文本原样不动，前端不做任何过滤。
  *
  * 实现上复用 [`parseChunk`]（一次不限块数的步进），保证增量解析与一次性解析
  * 的口径完全一致。
@@ -162,7 +158,7 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 }
 
 /**
- * 批量入队（后端逐条过过滤规则 + 自动开始下载）。
+ * 批量入队（后端逐条去重 + 自动开始下载）。
  * 失败时把后端错误原文抛给调用方展示，不做任何包装。
  */
 export function enqueueLinks(text: string, outputDir?: string | null): Promise<EnqueueResult> {

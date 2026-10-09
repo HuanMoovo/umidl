@@ -3,7 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NIcon, NTooltip } from 'naive-ui'
-import { ContrastOutline, MoonOutline, SunnyOutline } from '@vicons/ionicons5'
+import { MoonOutline, SunnyOutline } from '@vicons/ionicons5'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import { applyTheme, themeModes } from '@/services/theme'
@@ -16,14 +16,14 @@ const store = useTaskStore()
 const settingsStore = useSettingsStore()
 
 const title = computed(() => (route.meta?.title as string) || 'Umidl')
-const current = computed(() => settingsStore.settings.theme || 'system')
+const current = computed(() => settingsStore.settings.theme || 'dark')
 const running = computed(() => store.activeCount)
 
-/** 昼夜切换：浅色 / 深色 / 跟随系统（图标 + 文字提示） */
+/** 昼夜切换：浅色 / 深色（「跟随系统」已移除） */
 const modes = computed(() =>
   themeModes().map((m) => ({
     ...m,
-    icon: m.value === 'light' ? SunnyOutline : m.value === 'dark' ? MoonOutline : ContrastOutline,
+    icon: m.value === 'light' ? SunnyOutline : MoonOutline,
   })),
 )
 
@@ -46,7 +46,7 @@ async function setTheme(mode: ThemeMode) {
     </div>
 
     <div class="flex items-center gap-2">
-      <div class="umi-chip !text-[10.5px] tabular-nums">v1.8.10</div>
+      <div class="umi-chip !text-[10.5px] tabular-nums">v1.8.11</div>
 
       <!-- 昼夜切换：图标 + 提示 -->
       <div class="umi-seg" role="group" :aria-label="$t('昼夜模式切换')">

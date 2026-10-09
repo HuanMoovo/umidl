@@ -121,13 +121,6 @@ type EventMap = {
     /** 本次是不是断点续传 */
     resumed?: boolean
   }
-  'capture://url': {
-    url: string
-    source: string
-    queued: boolean
-    blocked: boolean
-    reason?: string | null
-  }
 }
 
 export function onEvent<K extends keyof EventMap>(

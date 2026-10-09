@@ -45,10 +45,10 @@ export function dropWhere<T>(list: T[], shouldDrop: (t: T) => boolean): T[] {
 
 /**
  * 下游下载入口的「终态」口径，与后端 `clear_downloads(which == "done")` 的
- * `status IN ('done','error','canceled','handed_off')` 严格一致：
+ * `status IN ('done','error','canceled')` 严格一致：
  * 清理已完成时前端摘掉的行，必须正好是后端删掉的行。
  */
-export const FINISHED_DOWNLOAD_STATUSES = ['done', 'error', 'canceled', 'handed_off'] as const
+export const FINISHED_DOWNLOAD_STATUSES = ['done', 'error', 'canceled'] as const
 
 export function isFinishedDownload(t: { status: string } | null | undefined): boolean {
   if (!t) return false

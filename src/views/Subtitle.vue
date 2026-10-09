@@ -11,8 +11,11 @@ import {
   DownloadOutline,
   FolderOpenOutline,
   SparklesOutline,
+  OptionsOutline,
 } from '@vicons/ionicons5'
 import ConvertRow from '@/components/ConvertRow.vue'
+import SettingsGroup from '@/components/SettingsGroup.vue'
+import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import { whisper, languages, OUTPUT_FORMATS, models, modelProgressText } from '@/services/whisper'
@@ -200,10 +203,6 @@ const noModelAtAll = computed(() => modelsLoaded.value && !modelReady.value && !
 const ready = computed(() => !noModelAtAll.value && whisperFound.value)
 
 /* ------------------------- 多语言 → 多任务 ------------------------- */
-function toggleLang(v: string) {
-  langs.value = langs.value.includes(v) ? langs.value.filter((x) => x !== v) : [...langs.value, v]
-}
-
 /** 本次要起的任务：每个语言一个；开了翻译再给每个语言补一个英文任务 */
 const jobs = computed<{ lang: string; translate: boolean }[]>(() => {
   const out: { lang: string; translate: boolean }[] = []
@@ -453,6 +452,9 @@ onMounted(async () => {
     <section class="umi-card p-4 transition-all" :class="dragging ? 'drop-active' : ''">
       <div class="umi-card-title">
         <NIcon :size="14" :component="ChatbubblesOutline" class="text-accent-pink" />{{ $t('视频 / 音频文件') }}
+        <span class="umi-spacer" />
+        <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
+        <ModeSwitch />
       </div>
 
       <div class="flex gap-2">
@@ -485,25 +487,20 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 识别语言（多选）：每个选中语言各起一个转写任务 -->
+      <!-- 识别语言（下拉多选，与下载页「字幕语言」同一款控件）：每个选中语言各起一个转写任务 -->
       <div class="mt-3">
         <label class="umi-label">{{ $t('识别语言（可多选）') }}</label>
-        <div class="flex flex-wrap gap-1.5" data-test="lang-chips">
-          <button
-            v-for="l in langOptions"
-            :key="l.value"
-            class="umi-btn umi-btn-sm"
-            :class="langs.includes(l.value) ? 'chip-active' : ''"
-            :aria-pressed="langs.includes(l.value)"
-            :data-lang="l.value"
-            @click="toggleLang(l.value)"
-          >
-            {{ l.label }}
-          </button>
-        </div>
+        <NSelect
+          v-model:value="langs"
+          multiple
+          :options="langOptions"
+          size="small"
+          :placeholder="$t('选择要识别的语言')"
+          data-test="lang-select"
+        />
       </div>
 
-      <div class="mt-3 grid gap-3 sm:grid-cols-3">
+      <div class="mt-3" data-test="subtitle-params-visible">
         <div>
           <label class="umi-label">{{ $t('Whisper 模型') }}</label>
           <NSelect
@@ -547,20 +544,27 @@ onMounted(async () => {
             {{ $t('已下载 · 占用 {size}', { size: formatBytes(selectedModelInfo.size_bytes) }) }}
           </div>
         </div>
-        <div>
-          <label class="umi-label">{{ $t('导出格式') }}</label>
-          <NSelect v-model:value="outputFormat" :options="fmtOptions" size="small" />
-        </div>
-        <div>
-          <label class="umi-label">{{ $t('翻译成英文') }}</label>
-          <div class="flex h-[34px] items-center gap-2">
-            <NSwitch v-model:value="translateEn" size="small" data-test="translate-en" />
-            <span class="umi-hint">{{ $t('每个语言额外生成一份英文字幕') }}</span>
-          </div>
-        </div>
       </div>
 
-      <!-- 自定义模型：贴链接 / 本地文件直接安装并启用（收成一行，不占版面） -->
+      <!-- 高级选项（1.10）：导出格式 / 翻译成英文收进默认折叠区组；简单模式整体不渲染 -->
+      <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="umi-label">{{ $t('导出格式') }}</label>
+            <NSelect v-model:value="outputFormat" :options="fmtOptions" size="small" />
+          </div>
+          <div>
+            <label class="umi-label">{{ $t('翻译成英文') }}</label>
+            <div class="flex h-[34px] items-center gap-2">
+              <NSwitch v-model:value="translateEn" size="small" data-test="translate-en" />
+              <span class="umi-hint">{{ $t('每个语言额外生成一份英文字幕') }}</span>
+            </div>
+          </div>
+        </div>
+      </SettingsGroup>
+
+      <!-- 自定义模型：贴链接 / 本地文件直接安装并启用（收成一行，不占版面）。
+           常显（不进折叠区组）：模型安装入口在简单模式下也要一眼可见 -->
       <div class="mt-2.5 flex flex-wrap items-center gap-1.5" data-test="subtitle-custom-model">
         <span class="s-text-3 shrink-0 text-[11px]">{{ $t('自定义模型') }}</span>
         <input

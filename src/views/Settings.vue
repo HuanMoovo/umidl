@@ -4,7 +4,7 @@
  *
  *  引擎  ← 依赖工具 + 下载引擎（aria2 状态/安装原本写了两遍，现在只留工具行一处）
  *  通用  ← 通用设置 + 默认参数（同一类「默认行为」配置不再分两个页签）
- *  系统  ← 系统与集成（浏览器捕获 / 系统与电源 / 更新与诊断）
+ *  系统  ← 系统与集成（系统与电源 / 更新与诊断）
  *  外观  ← 主题 + 强调色 + 自定义强调色合成一张卡
  *  插件  ← 插件与沙箱 / 已安装 / 市场 / 解析器与日志
  *
@@ -33,16 +33,23 @@ import {
   KeyOutline,
   FilmOutline,
   ChatbubblesOutline,
+  OptionsOutline,
+  ColorWandOutline,
+  ChevronDownOutline,
 } from '@vicons/ionicons5'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import SettingsV14 from '@/components/SettingsV14.vue'
 import SettingsPlugins from '@/components/SettingsPlugins.vue'
+import SettingsGroup from '@/components/SettingsGroup.vue'
+import ModeSwitch from '@/components/ModeSwitch.vue'
 import { resolveSettingsTab, SETTINGS_TABS, type SettingsTab } from '@/services/settingsTabs'
 import * as ipc from '@/services/ipc'
 import { localizeBackendError } from '@/services/backendError'
 import { formatBytes } from '@/services/utils'
-import { accents, applyTheme, themeModes } from '@/services/theme'
+import { accents, applyAccentGradient, applyAppearanceStyle, applyTheme, clearAccentGradient, themeModes } from '@/services/theme'
+import { formatGradient, normalizeAppearanceStyle, parseGradient } from '@/utils/accent'
+import type { AppearanceStyle } from '@/types'
 import { LOCALES, normalizeLocale, setLocale } from '@/i18n'
 import { currentLogoPath, useBranding } from '@/services/branding'
 import type { LocaleName } from '@/i18n'
@@ -68,11 +75,9 @@ const message = useMessage()
 const installing = ref<string | null>(null)
 
 /** 版本号缺失时给用户的解释（写在 title 上，不再是语焉不详的空白） */
-function probeHint(t: { version?: string | null; probe?: 'exec' | 'exists' | null }): string {
+function probeHint(t: { version?: string | null }): string {
   if ((t.version || '').trim()) return ''
-  return t.probe === 'exists'
-    ? tr('仅核对文件，不启动探测（GUI 程序）')
-    : tr('探活超时，无法确认版本')
+  return tr('探活超时，无法确认版本')
 }
 
 /* --------------- 依赖工具：按需勾选下载（纯逻辑见 services/toolSelection.ts） --------------- */
@@ -80,6 +85,13 @@ function probeHint(t: { version?: string | null; probe?: 'exec' | 'exists' | nul
 const selected = ref<string[]>([])
 
 const selSummary = computed(() => selectionSummary(selected.value, store.tools))
+
+/** 简单模式：工具列表默认只显示「摘要行 + 缺失工具」，「管理全部工具」展开后才是完整列表（高级模式恒为完整列表） */
+const manageTools = ref(false)
+
+/** 简单模式摘要 / 缺失列表的数据来源（直接按 found 计数，不做任何隐藏逻辑） */
+const readyCount = computed(() => store.tools.filter((t) => t.found).length)
+const missingTools = computed(() => store.tools.filter((t) => !t.found))
 
 function toggleTool(name: string, checked: boolean) {
   selected.value = checked
@@ -316,6 +328,9 @@ async function resetLogo() {
 
 const currentLocale = computed(() => normalizeLocale(settings.value.ui_language))
 
+/** 界面语言下拉选项（native 名称不翻译，value 即 LocaleName） */
+const localeOptions = computed(() => LOCALES.map((l) => ({ label: l.native, value: l.value })))
+
 async function setLanguage(name: LocaleName) {
   settingsStore.patch({ ui_language: name })
   setLocale(name)
@@ -328,6 +343,66 @@ async function setAccent(name: AccentName) {
   applyTheme(settingsStore.settings.theme as ThemeMode, name)
   await save()
 }
+
+/* ------------------------- 外观：风格 + 自定义渐变（1.10） ------------------------- */
+/** 「简单 / 高级」切换器是独立组件 ModeSwitch（功能页共用同一状态源：settingsStore.ui_mode） */
+
+/** 当前外观风格：glass 玻璃拟态（默认） | mono 黑白简约 */
+const styleMode = computed<AppearanceStyle>(() => normalizeAppearanceStyle(settings.value.appearance_style))
+
+async function setStyle(style: AppearanceStyle) {
+  settingsStore.patch({ appearance_style: style })
+  applyAppearanceStyle(style)
+  await save()
+}
+
+/** 自定义渐变：两个取色器 + 预览条 + 清除（空串 = 维持强调色渐变，现状不变） */
+const gradInit = parseGradient(settings.value.accent_gradient)
+const gradFrom = ref(gradInit?.from ?? '#7c4dff')
+const gradTo = ref(gradInit?.to ?? '#22d3ee')
+const gradActive = computed(() => !!parseGradient(settings.value.accent_gradient))
+const gradPreview = computed(() => `linear-gradient(90deg, ${gradFrom.value}, ${gradTo.value})`)
+
+/** 取色即预览 + 写入设置（拖动取色器时不打 IPC，落盘在 change 时做） */
+function onGradInput() {
+  const g = formatGradient(gradFrom.value, gradTo.value)
+  settingsStore.patch({ accent_gradient: g })
+  applyAccentGradient(g)
+}
+
+/** 取色器输入：起色 / 止色 各自更新后立即预览 */
+function onGradPick(which: 'from' | 'to', e: Event) {
+  const v = (e.target as HTMLInputElement | null)?.value
+  if (typeof v !== 'string') return
+  if (which === 'from') gradFrom.value = v
+  else gradTo.value = v
+  onGradInput()
+}
+
+/** 设置加载 / 外部改动后，把取色器回显成落盘的那条渐变（进页面时显示的就是当前值） */
+watch(
+  () => settings.value.accent_gradient,
+  (v) => {
+    const g = parseGradient(v)
+    if (!g) return
+    gradFrom.value = g.from
+    gradTo.value = g.to
+  },
+)
+
+async function saveGrad() {
+  await save()
+}
+
+async function resetGradient() {
+  settingsStore.patch({ accent_gradient: '' })
+  clearAccentGradient()
+  await save()
+  message.success(tr('已清除自定义渐变'))
+}
+
+/** 「自定义…」折叠区（自定义强调色 + 自定义渐变）：默认折叠；不跟 ui_mode 隐显，简单模式同样可用 */
+const customOpen = ref(false)
 
 /* ------------------------- 通用：路径 / 行为 / 默认参数 ------------------------- */
 async function pickDir() {
@@ -391,6 +466,14 @@ watch(() => route.query.tab, applyQueryTab)
 
 <template>
   <div class="umi-page">
+    <!-- 界面模式（1.10）：简单 = 只显示常用项；高级 = 全部可见。切换器与功能页共用同一状态源 -->
+    <div class="umi-inner flex flex-wrap items-center gap-2.5" data-test="ui-mode-bar">
+      <NIcon :size="14" :component="OptionsOutline" class="text-accent shrink-0" />
+      <span class="s-text-2 text-[12px] font-medium">{{ $t('界面模式') }}</span>
+      <ModeSwitch />
+      <span class="umi-hint">{{ $t('简单模式只显示常用项，切换高级可见全部') }}</span>
+    </div>
+
     <!-- 分段导航：5 个页签 -->
     <div class="flex flex-wrap gap-1.5">
       <button
@@ -408,7 +491,7 @@ watch(() => route.query.tab, applyQueryTab)
       </button>
     </div>
 
-    <!-- ============ 引擎：依赖工具 + Whisper 模型 + 引擎/路由/过滤/带宽 ============ -->
+    <!-- ============ 引擎：依赖工具 + Whisper 模型 + 引擎/带宽 ============ -->
     <section v-if="activeTab === 'engine'" class="space-y-3">
       <div class="umi-card p-4" data-test="tools-card">
         <div class="umi-card-title">
@@ -418,13 +501,14 @@ watch(() => route.query.tab, applyQueryTab)
           <button class="umi-btn umi-btn-xs" data-test="tools-select-missing" :disabled="!!installing" @click="selectMode('missing')">
             {{ $t('只选未装') }}
           </button>
-          <button class="umi-btn umi-btn-xs" data-test="tools-select-all" :disabled="!!installing" @click="selectMode('all')">
+          <!-- 全选 / 清空 / 校验所选：简单模式收起（进高级模式可视化），只留「只选未装 / 下载所选 / 重新检测」 -->
+          <button v-if="!settingsStore.isSimple" class="umi-btn umi-btn-xs" data-test="tools-select-all" :disabled="!!installing" @click="selectMode('all')">
             {{ $t('全选') }}
           </button>
-          <button class="umi-btn umi-btn-xs" data-test="tools-select-none" :disabled="!!installing" @click="selectMode('none')">
+          <button v-if="!settingsStore.isSimple" class="umi-btn umi-btn-xs" data-test="tools-select-none" :disabled="!!installing" @click="selectMode('none')">
             {{ $t('清空') }}
           </button>
-          <button class="umi-btn umi-btn-sm" data-test="tools-verify" :disabled="!!installing || !selSummary.total" @click="verifySelected">
+          <button v-if="!settingsStore.isSimple" class="umi-btn umi-btn-sm" data-test="tools-verify" :disabled="!!installing || !selSummary.total" @click="verifySelected">
             <span class="flex items-center gap-1"><NIcon :size="12" :component="CheckmarkCircleOutline" />{{ $t('校验所选') }}</span>
           </button>
           <button class="umi-btn-primary umi-btn-sm" data-test="tools-install-selected" :disabled="!!installing || !selSummary.total" @click="installSelected">
@@ -437,8 +521,38 @@ watch(() => route.query.tab, applyQueryTab)
           </button>
         </div>
 
-        <!-- 两列网格：9 个工具从 9 行压到 5 行，首屏内能看全 -->
-        <div class="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+        <!-- 简单模式：摘要行 + 仅缺失工具（每行一个安装按钮）+ 「管理全部工具」展开完整列表 -->
+        <div v-if="settingsStore.isSimple" data-test="tools-simple">
+          <div class="s-text-2 flex items-center gap-2 text-[12px]" data-test="tools-summary">
+            <NIcon :size="14" :component="CheckmarkCircleOutline" class="text-emerald-600 dark:text-emerald-400" />
+            {{ $t('已就绪 {ready} 项 · 缺失 {missing} 项', { ready: readyCount, missing: missingTools.length }) }}
+          </div>
+          <div v-for="t in missingTools" :key="t.name" class="umi-row mt-1.5 !py-1" :data-test="`tool-missing-${t.name}`">
+            <NIcon :size="14" :component="CloseCircleOutline" class="text-amber-600 dark:text-amber-400" />
+            <span class="s-text shrink-0 text-[12px] font-medium">{{ t.name }}</span>
+            <span class="s-text-3 min-w-0 flex-1 truncate text-[10px]" :title="t.path || t.hint">
+              {{ $t('未装 · {size}', { size: statusLine(t).sizeHint || t.hint }) }}
+            </span>
+            <button
+              v-if="t.installable"
+              class="umi-btn-primary umi-btn-xs"
+              :disabled="!!installing"
+              :data-test="`tool-missing-install-${t.name}`"
+              @click="installTool(t.name)"
+            >
+              {{ installing === t.name ? $t('安装中…') : actionLabel(t.name) }}
+            </button>
+            <span v-else class="s-text-3 text-[10px]">{{ t.name === 'ffprobe' ? $t('随 ffmpeg') : $t('需手动放置') }}</span>
+          </div>
+          <button class="umi-btn umi-btn-sm mt-1.5" data-test="tools-manage-toggle" @click="manageTools = !manageTools">
+            <span class="flex items-center gap-1">
+              <NIcon :size="12" :component="OptionsOutline" />{{ manageTools ? $t('收起全部工具') : $t('管理全部工具') }}
+            </span>
+          </button>
+        </div>
+
+        <!-- 两列网格：9 个工具从 9 行压到 5 行，首屏内能看全；简单模式展开「管理全部工具」后才渲染 -->
+        <div v-if="!settingsStore.isSimple || manageTools" class="grid gap-x-3 gap-y-1 sm:grid-cols-2" :class="settingsStore.isSimple ? 'mt-2' : ''">
           <div v-for="t in store.tools" :key="t.name" class="umi-row !py-1" :data-test="`tool-row-${t.name}`">
             <NCheckbox
               v-if="t.installable"
@@ -505,48 +619,44 @@ watch(() => route.query.tab, applyQueryTab)
         </div>
 
       <!-- 工具安装目录：可自定义（原生目录选择器 + 手填校验），换目录时可迁移已有工具。
-           与依赖工具同卡（不新增卡片：Settings.vue 的卡片预算由 uiLayout.test.ts 守住） -->
-      <div class="umi-inner mt-3" data-test="tool-dir-card">
-        <div class="s-text-2 flex items-center gap-2 text-[12px] font-medium">
-          <NIcon :size="14" :component="FolderOpenOutline" class="text-accent" />{{ $t('工具安装目录') }}
+           简单模式整块不渲染；高级模式折叠在「工具安装目录」区组里（内容仍挂本卡，卡片预算不反弹） -->
+      <SettingsGroup :title="$t('工具安装目录')" :icon="FolderOpenOutline" bare class="mt-3">
+        <template #extra>
           <span v-if="toolDir && !toolDir.custom" class="s-text-3 text-[10px]">{{ $t('当前使用默认目录') }}</span>
+        </template>
+        <div class="umi-inner" data-test="tool-dir-card">
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              v-model="dirDraft"
+              class="umi-input min-w-[220px] flex-1 !text-[11.5px]"
+              :placeholder="toolDir ? toolDir.default_dir : ''"
+              data-test="tool-dir-input"
+            />
+            <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="dirBusy" data-test="tool-dir-browse" @click="pickToolDir">
+              <span class="flex items-center gap-1"><NIcon :size="12" :component="FolderOpenOutline" />{{ $t('浏览…') }}</span>
+            </button>
+            <button class="umi-btn-primary umi-btn-sm whitespace-nowrap" :disabled="dirBusy" data-test="tool-dir-apply" @click="applyToolDir(dirDraft)">
+              {{ dirBusy ? $t('处理中…') : $t('应用目录') }}
+            </button>
+            <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="dirBusy || !toolDir || !toolDir.custom" data-test="tool-dir-reset" @click="applyToolDir('')">
+              {{ $t('恢复默认') }}
+            </button>
+          </div>
+          <label class="s-text-2 mt-2 flex cursor-pointer items-center gap-2 text-[12px]">
+            <NSwitch v-model:value="dirMigrate" size="small" :disabled="dirBusy" />{{ $t('迁移已有工具（先复制校验，成功后才删旧目录）') }}
+          </label>
+          <div class="umi-hint mt-1.5">
+            {{ $t('受管工具（yt-dlp / ffmpeg / whisper 等）安装在这里；解析与调用只认这个目录，不改系统 PATH。') }}
+          </div>
+          <div v-if="toolDir" class="umi-hint mt-1 truncate" :title="toolDir.dir">{{ $t('生效目录：{dir}', { dir: toolDir.dir }) }}</div>
+          <div v-if="toolDir && !toolDir.valid" class="mt-1 text-[11px] text-amber-500">
+            {{ $t('配置里的工具目录不是绝对路径，已回退到默认目录。') }}
+          </div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <input
-            v-model="dirDraft"
-            class="umi-input min-w-[220px] flex-1 !text-[11.5px]"
-            :placeholder="toolDir ? toolDir.default_dir : ''"
-            data-test="tool-dir-input"
-          />
-          <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="dirBusy" data-test="tool-dir-browse" @click="pickToolDir">
-            <span class="flex items-center gap-1"><NIcon :size="12" :component="FolderOpenOutline" />{{ $t('浏览…') }}</span>
-          </button>
-          <button class="umi-btn-primary umi-btn-sm whitespace-nowrap" :disabled="dirBusy" data-test="tool-dir-apply" @click="applyToolDir(dirDraft)">
-            {{ dirBusy ? $t('处理中…') : $t('应用目录') }}
-          </button>
-          <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="dirBusy || !toolDir || !toolDir.custom" data-test="tool-dir-reset" @click="applyToolDir('')">
-            {{ $t('恢复默认') }}
-          </button>
-        </div>
-        <label class="s-text-2 mt-2 flex cursor-pointer items-center gap-2 text-[12px]">
-          <NSwitch v-model:value="dirMigrate" size="small" :disabled="dirBusy" />{{ $t('迁移已有工具（先复制校验，成功后才删旧目录）') }}
-        </label>
-        <div class="umi-hint mt-1.5">
-          {{ $t('受管工具（yt-dlp / ffmpeg / whisper 等）安装在这里；解析与调用只认这个目录，不改系统 PATH。') }}
-        </div>
-        <div v-if="toolDir" class="umi-hint mt-1 truncate" :title="toolDir.dir">{{ $t('生效目录：{dir}', { dir: toolDir.dir }) }}</div>
-        <div v-if="toolDir && !toolDir.valid" class="mt-1 text-[11px] text-amber-500">
-          {{ $t('配置里的工具目录不是绝对路径，已回退到默认目录。') }}
-        </div>
-      </div>
-      </div>
-
-      <!-- 下载引擎 / 链接路由与过滤 / 带宽与并发（原「下载引擎」页签 5 张卡收成 3 张） -->
-      <!-- 语音模型的下载与管理已挪到「字幕」页（选择模型的同一处），这里只留一行指引 -->
-      <div class="umi-hint px-1" data-test="models-moved-hint">
-        {{ $t('Whisper 语音模型的下载 / 自定义导入已挪到「字幕」页 —— 在模型下拉框下方即可直接下载或贴链接安装。') }}
+      </SettingsGroup>
       </div>
 
+      <!-- 下载引擎 / 带宽与并发：后者默认收进「高级 · 限速与并发」区组（见 SettingsV14） -->
       <SettingsV14 section="engine" />
     </section>
 
@@ -563,7 +673,8 @@ watch(() => route.query.tab, applyQueryTab)
           <button class="umi-btn-primary whitespace-nowrap" @click="saveMsg()">{{ $t('保存') }}</button>
         </div>
 
-        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <SettingsGroup :title="$t('网络与账户')" :icon="CloudUploadOutline" class="mt-3">
+        <div class="grid gap-3 sm:grid-cols-2">
           <div>
             <label class="umi-label">{{ $t('代理服务器') }}</label>
             <NInput v-model:value="settings.proxy" size="small" placeholder="http://127.0.0.1:7890" @blur="save" />
@@ -584,13 +695,15 @@ watch(() => route.query.tab, applyQueryTab)
             </div>
           </div>
         </div>
+        </SettingsGroup>
 
-        <div class="mt-3 border-t s-border-soft pt-2.5">
+        <!-- 「打开数据目录」不再占据首屏：收进高级折叠区组（简单模式整体不渲染） -->
+        <SettingsGroup :title="$t('数据目录')" :icon="FolderOpenOutline" class="mt-3">
           <button class="umi-btn umi-btn-sm" @click="openDataDir">
             <span class="flex items-center gap-1">
               <NIcon :size="12" :component="FolderOpenOutline" />{{ $t('打开数据目录') }}</span>
           </button>
-        </div>
+        </SettingsGroup>
       </div>
 
       <div class="umi-card p-4" data-test="behavior-card">
@@ -609,12 +722,9 @@ watch(() => route.query.tab, applyQueryTab)
         </div>
       </div>
 
-      <!-- 默认参数：下载 / 转换 / 字幕三组收进一张卡（原来是三张各占一屏的卡） -->
-      <div class="umi-card p-4" data-test="defaults-card">
-        <div class="umi-card-title">
-          <NIcon :size="14" :component="FilmOutline" class="text-accent" />{{ $t('默认参数') }}
-        </div>
-
+      <!-- 新任务默认参数（1.10）：下载 / 转换 / 字幕三组收进默认折叠区组；简单模式下整体不渲染 -->
+      <SettingsGroup :title="$t('新任务默认参数')" :icon="FilmOutline" bare>
+        <div class="umi-card p-4" data-test="defaults-card">
         <div class="s-text-2 mb-2 flex items-center gap-1.5 text-[11.5px] font-medium">
           <NIcon :size="13" :component="DownloadOutline" class="text-accent" />{{ $t('下载默认值') }}
         </div>
@@ -730,22 +840,23 @@ watch(() => route.query.tab, applyQueryTab)
             />
           </div>
         </div>
-      </div>
+        </div>
+      </SettingsGroup>
     </section>
 
-    <!-- ============ 系统：浏览器捕获 / 系统与电源 / 更新与诊断 ============ -->
+    <!-- ============ 系统：系统与电源 / 更新与诊断 ============ -->
     <section v-else-if="activeTab === 'system'" class="space-y-3">
       <SettingsV14 section="system" />
     </section>
 
-    <!-- ============ 外观：主题与强调色 + 界面语言 + 品牌与动画 ============ -->
+    <!-- ============ 外观：主题 + 强调色与渐变 + 界面语言 + 品牌与动画（4 张卡） ============ -->
     <section v-else-if="activeTab === 'appearance'" class="space-y-3">
-      <!-- 主题 + 预设强调色 + 自定义强调色，三张卡合成一张 -->
+      <!-- 卡 1：主题（浅色 / 深色）+ 界面风格（玻璃拟态 / 黑白简约）合二为一；「跟随系统」已删除 -->
       <div class="umi-card p-4" data-test="theme-card">
         <div class="umi-card-title">
-          <NIcon :size="14" :component="ContrastOutline" class="text-accent" />{{ $t('主题与强调色') }}
+          <NIcon :size="14" :component="ContrastOutline" class="text-accent" />{{ $t('主题') }}
         </div>
-        <div class="grid gap-2.5 sm:grid-cols-3">
+        <div class="grid gap-2.5 sm:grid-cols-2">
           <button
             v-for="t in themeModes()"
             :key="t.value"
@@ -762,8 +873,46 @@ watch(() => route.query.tab, applyQueryTab)
           </button>
         </div>
 
-        <div class="s-text-2 mb-2 mt-3 flex items-center gap-2 text-[12px] font-medium">
-          <NIcon :size="14" :component="ColorPaletteOutline" class="text-accent" />{{ $t('强调色') }}
+        <!-- 界面风格（1.10）：玻璃拟态（现状） / 黑白简约（与主题同卡第二行） -->
+        <div class="s-text-2 mb-2 mt-3 flex items-center gap-2 border-t s-border-soft pt-3 text-[12px] font-medium">
+          <NIcon :size="14" :component="ColorWandOutline" class="text-accent" />{{ $t('界面风格') }}
+        </div>
+        <div class="grid gap-2.5 sm:grid-cols-2">
+          <button
+            v-for="s in [
+              { value: 'glass', label: $t('玻璃拟态（默认）'), hint: $t('毛玻璃卡片与彩色光晕（现状）') },
+              { value: 'mono', label: $t('黑白简约'), hint: $t('纯黑 / 纯白背景，去模糊去彩色阴影，强调色退化为黑 / 白') },
+            ]"
+            :key="s.value"
+            class="umi-entry flex items-center gap-3"
+            :class="styleMode === s.value ? '!border-umi-400/60 !bg-umi-500/15' : ''"
+            :data-test="`style-${s.value}`"
+            @click="setStyle(s.value as AppearanceStyle)"
+          >
+            <span
+              class="h-4 w-4 shrink-0 rounded-full border s-border-soft"
+              :style="{
+                background:
+                  s.value === 'mono'
+                    ? settings.theme === 'light'
+                      ? '#111111'
+                      : '#f5f5f5'
+                    : 'linear-gradient(135deg, #7c4dff, #22d3ee)',
+              }"
+            />
+            <span>
+              <span class="block text-[12.5px] font-medium s-text">{{ s.label }}</span>
+              <span class="block text-[10.5px] s-text-3">{{ s.hint }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 卡 2：强调色与渐变 —— 预设六色保留；自定义强调色 + 自定义渐变收进「自定义…」折叠区
+           （默认折叠，简单 / 高级模式都可见：只折叠，不跟 ui_mode 隐显） -->
+      <div class="umi-card p-4" data-test="accent-card">
+        <div class="umi-card-title">
+          <NIcon :size="14" :component="ColorPaletteOutline" class="text-accent" />{{ $t('强调色与渐变') }}
         </div>
         <div class="flex flex-wrap gap-2">
           <button
@@ -779,29 +928,87 @@ watch(() => route.query.tab, applyQueryTab)
           </button>
         </div>
 
-        <!-- 自定义强调色（原「外观」页签最后一张卡，现并入本卡） -->
-        <SettingsV14 section="accent" />
+        <div class="umi-group mt-3">
+          <button
+            type="button"
+            class="umi-group-head"
+            :aria-expanded="customOpen"
+            data-test="accent-custom-toggle"
+            @click="customOpen = !customOpen"
+          >
+            <NIcon :size="13" :component="ColorWandOutline" class="text-accent shrink-0" />
+            <span class="s-text-2 text-[12px] font-medium">{{ $t('自定义…') }}</span>
+            <span class="umi-spacer" />
+            <NIcon
+              :size="14"
+              :component="ChevronDownOutline"
+              class="umi-group-chevron s-text-3 shrink-0"
+              :class="customOpen ? 'is-open' : ''"
+            />
+          </button>
+          <div v-show="customOpen" class="umi-group-body">
+            <!-- 自定义强调色（原「外观」页签最后一张卡，现并入本卡折叠区） -->
+            <SettingsV14 section="accent" />
+
+            <!-- 自定义渐变（1.10）：非空时用于侧栏选中项 / 主按钮 / 标题渐变三处强调位置 -->
+            <div class="s-text-2 mb-2 mt-3 flex items-center gap-2 border-t s-border-soft pt-3 text-[12px] font-medium">
+              <NIcon :size="14" :component="ColorPaletteOutline" class="text-accent" />{{ $t('自定义渐变') }}
+              <span class="umi-spacer" />
+              <span v-if="gradActive" class="umi-hint">{{ $t('已启用：侧栏选中项 / 主按钮 / 标题渐变') }}</span>
+            </div>
+            <div class="flex flex-wrap items-end gap-3">
+              <div>
+                <label class="umi-label">{{ $t('起始颜色') }}</label>
+                <input
+                  type="color"
+                  class="h-[34px] w-16 cursor-pointer rounded-xl border bg-transparent p-0.5 s-border-soft"
+                  :value="gradFrom"
+                  data-test="grad-from"
+                  @input="onGradPick('from', $event)"
+                  @change="saveGrad"
+                />
+              </div>
+              <div>
+                <label class="umi-label">{{ $t('结束颜色') }}</label>
+                <input
+                  type="color"
+                  class="h-[34px] w-16 cursor-pointer rounded-xl border bg-transparent p-0.5 s-border-soft"
+                  :value="gradTo"
+                  data-test="grad-to"
+                  @input="onGradPick('to', $event)"
+                  @change="saveGrad"
+                />
+              </div>
+              <div class="min-w-[160px] flex-1">
+                <label class="umi-label">{{ $t('渐变预览') }}</label>
+                <div class="h-[34px] rounded-xl border s-border-soft" :style="{ backgroundImage: gradPreview }" data-test="grad-preview" />
+              </div>
+              <button class="umi-btn umi-btn-sm" :disabled="!gradActive" data-test="grad-clear" @click="resetGradient">
+                {{ $t('清除渐变') }}
+              </button>
+            </div>
+            <div class="umi-hint mt-2">
+              {{ $t('两个色值都不为空时生效：侧栏选中项、主按钮与标题渐变改用这条渐变；清除后回到强调色渐变。') }}
+            </div>
+          </div>
+        </div>
       </div>
 
+      <!-- 卡 3：界面语言（四张卡片 → 一个下拉，切换立即生效逻辑不变） -->
       <div class="umi-card p-4" data-test="language-card">
         <div class="umi-card-title">
           <NIcon :size="14" :component="LanguageOutline" class="text-accent" />{{ $t('界面语言') }}
           <span class="umi-spacer" />
           <span class="umi-hint">{{ $t('切换后立即生效，无需重启。') }}</span>
         </div>
-        <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          <button
-            v-for="l in LOCALES"
-            :key="l.value"
-            class="umi-entry !py-2"
-            :class="currentLocale === l.value ? '!border-umi-400/60 !bg-umi-500/15' : ''"
-            :data-test="`locale-${l.value}`"
-            @click="setLanguage(l.value)"
-          >
-            <span class="block text-[12.5px] font-medium s-text">{{ l.native }}</span>
-            <span class="block text-[10.5px] s-text-3">{{ l.code }}</span>
-          </button>
-        </div>
+        <NSelect
+          class="max-w-[240px]"
+          :value="currentLocale"
+          :options="localeOptions"
+          size="small"
+          data-test="language-select"
+          @update:value="(v) => setLanguage(v as LocaleName)"
+        />
       </div>
 
       <!-- 自定义 LOGO + 动画与性能，两张只有几个控件的卡合成一张「品牌与动画」 -->
@@ -836,7 +1043,7 @@ watch(() => route.query.tab, applyQueryTab)
             <NSwitch v-model:value="settings.animation" size="small" @update:value="save" />{{ $t('背景粒子动画（关闭可明显降低 GPU / CPU 占用）') }}</label>
           <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
             <NSwitch v-model:value="settings.compact_cards" size="small" @update:value="save" />{{ $t('紧凑任务卡片') }}</label>
-          <div>
+          <div v-if="settings.animation">
             <label class="umi-label">{{ $t('动画质量') }}</label>
             <NSelect
               v-model:value="settings.animation_quality"
@@ -849,7 +1056,7 @@ watch(() => route.query.tab, applyQueryTab)
               @update:value="save"
             />
           </div>
-          <div>
+          <div v-if="settings.animation">
             <label class="umi-label">{{ $t('粒子形状') }}</label>
             <NSelect
               v-model:value="settings.particle_shape"

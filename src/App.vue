@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN, enUS, dateEnUS, jaJP, dateJaJP, frFR, dateFrFR } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { normalizeLocale, setLocale } from '@/i18n'
 import { setLogoPath } from '@/services/branding'
 import SideBar from '@/components/SideBar.vue'
-import CaptureWatcher from '@/components/CaptureWatcher.vue'
 import ParticleBg from '@/components/ParticleBg.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
-import { applyCustomAccent, applyTheme, clearCustomAccent, naiveOverrides, startSystemThemeWatch } from '@/services/theme'
-import { syncWindowTheme, watchWindowTheme } from '@/services/windowTheme'
+import {
+  applyAccentGradient,
+  applyAppearanceStyle,
+  applyCustomAccent,
+  applyTheme,
+  clearCustomAccent,
+  naiveOverrides,
+} from '@/services/theme'
+import { syncWindowTheme } from '@/services/windowTheme'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -24,8 +30,6 @@ const taskStore = useTaskStore()
 const settingsStore = useSettingsStore()
 const booted = ref(false)
 const resolved = ref<'dark' | 'light'>('dark')
-let stopSystemWatch: (() => void) | null = null
-let stopWindowWatch: (() => void) | null = null
 
 const themeOverrides = computed<GlobalThemeOverrides>(
   () =>
@@ -33,6 +37,8 @@ const themeOverrides = computed<GlobalThemeOverrides>(
       // 自定义强调色优先，没设时回退到预设名（violet / cyan …）
       settingsStore.settings.accent_custom || settingsStore.settings.accent,
       resolved.value === 'dark',
+      // 黑白简约：强调色退化为黑 / 白反色（开关、滑块、进度条同步跟随）
+      settingsStore.appearanceStyle === 'mono',
     ) as GlobalThemeOverrides,
 )
 
@@ -50,8 +56,8 @@ const naiveDateLocale = computed(() => NAIVE_LOCALE[normalizeLocale(locale.value
 function sync(mode?: string, accent?: string) {
   const m = mode ?? settingsStore.settings.theme
   resolved.value = applyTheme(m, accent ?? settingsStore.settings.accent)
-  // 窗口主题跟着走：system 时交还系统，昼夜跟随才能真正生效
-  void syncWindowTheme(m || 'system')
+  // 窗口主题跟着走（跟随系统已移除：主题只有浅色 / 深色两种值）
+  void syncWindowTheme(m)
 }
 
 /**
@@ -63,21 +69,13 @@ function syncCustomAccent() {
   if (!applyCustomAccent(hex, resolved.value === 'dark')) clearCustomAccent()
 }
 
-// 系统昼夜变化时，若为“跟随系统”则实时切换
-stopSystemWatch = null
+// 系统昼夜变化时不再跟随时段切换（「跟随系统」已移除）
 
 onMounted(async () => {
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
   if (nav) flog(`WebView 首字节 ${nav.responseStart.toFixed(0)}ms · DOM 就绪 ${nav.domContentLoadedEventEnd.toFixed(0)}ms`)
   flog('Vue 挂载完成，开始加载设置')
   applyTheme(settingsStore.settings.theme, settingsStore.settings.accent)
-  const onSys = () => {
-    if ((settingsStore.settings.theme || 'system') === 'system') sync()
-  }
-  // 跟随系统：媒体查询事件 + 轮询 + 回窗口复核（三条路兜底，见 startSystemThemeWatch 注释）
-  stopSystemWatch = startSystemThemeWatch(onSys)
-  // 双保险：Tauri 窗口主题变化事件（WebView2 的媒体查询偶有不触发的情况）
-  stopWindowWatch = await watchWindowTheme(onSys)
   await settingsStore.load()
   flog('设置加载完成')
   setLocale(settingsStore.settings.ui_language)
@@ -85,15 +83,13 @@ onMounted(async () => {
   sync()
   // 上次保存的自定义强调色随启动立即生效，无需再进「设置 → 外观」
   syncCustomAccent()
+  // 外观风格（玻璃拟态 / 黑白简约）与自定义渐变：启动即恢复
+  applyAppearanceStyle(settingsStore.settings.appearance_style)
+  applyAccentGradient(settingsStore.settings.accent_gradient)
   flog(settingsStore.settings.accent_custom ? '自定义强调色已恢复' : '主题已应用')
   await taskStore.bootstrap()
   flog('任务数据 + 工具检测完成，隐藏加载遮罩')
   booted.value = true
-})
-
-onUnmounted(() => {
-  stopSystemWatch?.()
-  stopWindowWatch?.()
 })
 
 watch(() => [settingsStore.settings.theme, settingsStore.settings.accent], () => sync(), { deep: true })
@@ -101,7 +97,19 @@ watch(() => [settingsStore.settings.theme, settingsStore.settings.accent], () =>
 // 自定义强调色变化：立即写回 <html> 上的内联 CSS 变量（清空 → 撤掉覆盖，回到预设色）
 watch(() => settingsStore.settings.accent_custom, () => syncCustomAccent())
 
-// 明暗变化（含「跟随系统」的昼夜切换）：--umi-accent-text 要在亮档(a300)/深档(a700) 之间重算
+// 外观风格（1.10）：glass / mono 切换 → 写 <html data-style>
+watch(
+  () => settingsStore.settings.appearance_style,
+  (v) => applyAppearanceStyle(v),
+)
+
+// 自定义渐变（1.10）：非空 → 注入 --accent-grad-a/b；清空 → 回落强调色渐变
+watch(
+  () => settingsStore.settings.accent_gradient,
+  (v) => applyAccentGradient(v),
+)
+
+// 明暗变化：--umi-accent-text 要在亮档(a300)/深档(a700) 之间重算
 watch(resolved, () => syncCustomAccent())
 
 // 语言变化：切换 vue-i18n（模板里的 $t 自动重渲染）
@@ -128,10 +136,9 @@ watch(
   >
     <NMessageProvider :max="4">
       <NDialogProvider>
-        <CaptureWatcher />
         <div class="relative h-screen w-screen overflow-hidden">
           <ParticleBg
-            :enabled="settingsStore.settings.animation !== false"
+            :enabled="settingsStore.settings.animation !== false && settingsStore.appearanceStyle !== 'mono'"
             :quality="settingsStore.settings.animation_quality || 'medium'"
             :shape="settingsStore.settings?.particle_shape ?? 'circle'"
           />

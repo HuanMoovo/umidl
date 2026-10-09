@@ -69,8 +69,8 @@ cargo run --release --features selftest -- --selftest --quick  # 快速自检（
 umi-downloader
 ├── src/                      # 前端（Vue 3 + TS + Tailwind + Naive UI）
 │   ├── views/                # Home / Download / Converter / Subtitle / Settings 五个页面
-│   ├── components/           # SideBar / TitleBar / TaskCard / TaskTable / ParticleBg / Ed2kPanel …
-│   ├── services/             # ipc.ts（IPC 封装）· downloader · ffmpeg · whisper · docEngine · ed2k
+│   ├── components/           # SideBar / TitleBar / TaskCard / TaskTable / ParticleBg …
+│   ├── services/             # ipc.ts（IPC 封装）· downloader · ffmpeg · whisper · docEngine
 │   │                         # formatCatalog（80 种格式目录）· batch（批量导入）· plugins · theme
 │   ├── stores/               # Pinia：tasks / settings
 │   ├── i18n/                 # index.ts + locales/{zh,en,ja,fr}.ts
@@ -81,11 +81,8 @@ umi-downloader
 │   ├── src/converter.rs      # FFmpeg 集成（ffprobe · 参数 · 进度）
 │   ├── src/docs.rs           # 文档解析（docx/xlsx/pptx 纯 Rust 解析 + pandoc/poppler 调度）
 │   ├── src/subtitle.rs       # Whisper.cpp 集成（抽音轨 · 转写 · 字幕格式）
-│   ├── src/ed2k.rs           # eMule 引擎接管与交接核对
-│   ├── src/plugins.rs        # QuickJS 沙箱与插件市场（sha256 校验）
+│   ├── src/plugins.rs        # QuickJS 沙箱 · 插件市场（sha256）· GitHub / 直链安装
 │   ├── src/tools.rs          # 外部工具检测与托管安装
-│   ├── src/capture.rs        # 浏览器捕获（127.0.0.1:6970，令牌强制）
-│   ├── src/filters.rs        # 扩展名 / 域名 / 大小过滤
 │   ├── src/ratelimit.rs      # 全局限速令牌桶
 │   ├── src/db.rs             # SQLite 数据层（rusqlite）
 │   ├── src/selftest.rs       # 自动化自检（feature = "selftest"）
@@ -103,7 +100,7 @@ umi-downloader
 ```bash
 npx vue-tsc --noEmit               # 1. 前端类型检查
 npx vitest run                     # 2. 前端单元测试（用例与源码同目录，*.test.ts）
-cd src-tauri && cargo test --lib   # 3. Rust 单元测试（令牌桶 / 过滤器 / 捕获解析 / aria2 参数）
+cd src-tauri && cargo test --lib   # 3. Rust 单元测试（令牌桶 / 下载参数解析 / 文档 / 字幕 / 插件沙箱）
 python scripts/check_i18n_catalog.py  # 4. i18n 校对：四语言包 key 集合必须一致（脚本内做 JS 转义还原）
 ```
 
@@ -134,11 +131,9 @@ cd src-tauri && cargo run --release --features selftest -- --selftest --quick
 
 ## 跨平台注意事项
 
-同一份代码要在 Windows / macOS / Linux 上跑，下面三处是**已踩过的坑**，改动这几块时两个平台都要想一遍：
+同一份代码要在 Windows / macOS / Linux 上跑，下面这条是**已踩过的坑**，改相关代码时两个平台都要想一遍：
 
-1. **macOS（BSD）的 `accept` 会让新连接继承监听套接字的非阻塞标志**，Linux 不会。所以 `capture.rs` 接受连接后必须显式改回阻塞读——否则每个请求都会在 `read_line` 上立刻拿到 `EAGAIN`，被误判成读超时并回 408。读超时另由 `SO_RCVTIMEO` 兜底。
-2. **Unix 上杀超时进程必须按进程组**（`libc::kill(-pgid)`，配合 spawn 时建组）。只杀直接子进程时，`sh -c "sleep 5"` 这类命令的孙进程仍持有管道写端，读线程要等它自然退出——实测「400 ms 超时」的用例拖到 5.01 秒才返回。Windows 侧对应 `taskkill /T`。
-3. **端口释放后立即重绑可能短暂失败**（macOS 回收延迟、Windows `TIME_WAIT` 的 `os error 10048`）。绑定要做有界重试（≤2 秒）；端口确实被占用时仍要如实报错，不要吞掉。
+1. **Unix 上杀超时进程必须按进程组**（`libc::kill(-pgid)`，配合 spawn 时建组）。只杀直接子进程时，`sh -c "sleep 5"` 这类命令的孙进程仍持有管道写端，读线程要等它自然退出——实测「400 ms 超时」的用例拖到 5.01 秒才返回。Windows 侧对应 `taskkill /T`。
 
 另外：**本机只能验证本机平台的产物**。macOS / Linux 的结论以 CI 与容器为准——Linux 可以照 `scripts/docker/` 下的脚本在 `ubuntu:22.04` 里跑全量单测复现。
 
@@ -170,7 +165,7 @@ python scripts/drive_app.py click "selector"
 2. 小步提交，提交信息写明「做了什么 + 为什么」：
 
    ```
-   fix: ED2K 面板折叠后不刷新源数量
+   fix: 下载队列折叠后不刷新进度
 
    原因：折叠状态下的定时刷新被 v-if 卸载打断。
    现在改为父层持有定时器，折叠只切显示。
@@ -195,12 +190,12 @@ python scripts/drive_app.py click "selector"
 3. **不污染系统 PATH**：外部工具只装到托管目录，不加系统环境变量、不写全局注册表项（检测顺序固定：用户指定路径 → 应用托管目录 → 主程序同级目录 → 系统 PATH）。
 4. **不上传用户数据**：不引入遥测、统计、崩溃上报、云端解析。所有下载 / 转码 / 识别都在本机完成——这是产品的定义，不是可选项。
 5. **语言包的 key 不可重命名**（中文原文即 key）：改 key 等于把所有已有翻译删掉。要改措辞就当作新增条目，四个语言包一起补。
-6. **浏览器捕获接口的安全约束**（`127.0.0.1:6970`）：令牌强制校验不能关、不能给响应加 CORS 通配头、不能改成监听 `0.0.0.0`。
-7. **插件沙箱预算**（16 MB 内存 / 200 ms 单次执行 / 白名单 API，无 `require`·`process`·`fetch`）不得为了「让某个插件能跑」而放宽；需要更多能力请先开 issue。
+6. **插件沙箱预算**（16 MB 内存 / 200 ms 单次执行 / 白名单 API，无 `require`·`process`·`fetch`）不得为了「让某个插件能跑」而放宽；需要更多能力请先开 issue。
+7. **从 GitHub / https 直链安装的边界**：仅 https、单文件 ≤ 5 MB、请求超时 60 s、内容只落盘不执行、只写 `plugins/<id>/`；插件清单约定（`plugin.json` / `manifest.json` + `entry`）见 README「插件包与从 GitHub 安装约定」——收紧可以，放宽请先开 issue。
 8. **版本号六处一致**：`package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` 决定产物版本；`src/components/TitleBar.vue` / `README.md` / `docs/index.html` 是界面与文档里对外显示的版本号，发版时一并更新。
 
 ---
 
 ## 许可证与贡献授权
 
-本项目以 **AGPL-3.0-only** 发布（见 [LICENSE](LICENSE)）。你提交的贡献默认按同一许可证授权（inbound = outbound），请确保你有权提交这些代码，并且不包含与 AGPL-3.0 不兼容的第三方代码。修改运行时会下载的第三方工具（yt-dlp / FFmpeg / aria2c / eMule / ImageMagick / pandoc / poppler / whisper.cpp）不在此列——那些是各自独立许可的程序，本仓库不包含它们的源码。
+本项目以 **AGPL-3.0-only** 发布（见 [LICENSE](LICENSE)）。你提交的贡献默认按同一许可证授权（inbound = outbound），请确保你有权提交这些代码，并且不包含与 AGPL-3.0 不兼容的第三方代码。修改运行时会下载的第三方工具（yt-dlp / FFmpeg / aria2c / ImageMagick / pandoc / poppler / whisper.cpp）不在此列——那些是各自独立许可的程序，本仓库不包含它们的源码。

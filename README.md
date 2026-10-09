@@ -6,13 +6,13 @@
 
 **轻量化、美观、高性能的视频下载 / 格式转换 / AI 字幕桌面客户端**
 
-下载 + 转换 + 字幕，一站式搞定。**Tauri 2 + Rust + Vue 3** 构建，安装包 **4.62 MiB**，全部处理在**本机**完成——不上传、不注册、不埋点。
+下载 + 转换 + 字幕，一站式搞定。**Tauri 2 + Rust + Vue 3** 构建，安装包 **4.46 MiB**，全部处理在**本机**完成——不上传、不注册、不埋点。
 
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-2f81f7.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3fb950.svg)](#-平台支持)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org)
-[![Installer size](https://img.shields.io/badge/Installer-5.44%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
+[![Installer size](https://img.shields.io/badge/Installer-4.46%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
 [![i18n](https://img.shields.io/badge/i18n-%E4%B8%AD%20%C2%B7%20EN%20%C2%B7%20%E6%97%A5%20%C2%B7%20FR-8957e5.svg)](#界面与主题)
 
 [快速开始](#-快速开始) · [它做什么](#-它做什么) · [功能](#-功能) · [平台支持](#-平台支持) · [参与贡献](CONTRIBUTING.md) · [开源介绍页](https://huanmoovo.github.io/umidl/) · [路线图](docs/ROADMAP.md)
@@ -20,10 +20,10 @@
 <sub>简体中文 · <a href="README.en.md">English</a> · <a href="README.ja.md">日本語</a></sub>
 
 <a href="https://huanmoovo.github.io/umidl/">
-  <img src="docs/img/home.webp" alt="Umidl 1.8.10 主界面：链接输入框、四类任务计数与三个功能入口" width="860" />
+  <img src="docs/img/home.webp" alt="Umidl 1.8.11 主界面：链接输入框、四类任务计数与三个功能入口" width="860" />
 </a>
 
-<sub>Umidl 1.8.10 主界面（Windows 实机截图，沙箱数据目录）· <a href="https://huanmoovo.github.io/umidl/#screens">查看全部 7 张界面截图</a></sub>
+<sub>Umidl 1.8.11 主界面（Windows 实机截图，沙箱数据目录）· <a href="https://huanmoovo.github.io/umidl/#screens">查看全部 7 张界面截图</a></sub>
 
 </div>
 
@@ -31,12 +31,12 @@
 
 ## 🎯 它做什么
 
-**在本机把「下载 → 转换 → 字幕」一条链做完**——安装包 4.62 MiB（1.8.10 Windows NSIS 实测）。
+**在本机把「下载 → 转换 → 字幕」一条链做完**——安装包 4.46 MiB（1.8.11 Windows NSIS 实测）。
 
-| 能力 | 现状（1.8.10；均可从仓库与程序界面核对） |
+| 能力 | 现状（1.8.11；均可从仓库与程序界面核对） |
 | --- | --- |
 | **本地处理，不上传** | 全流程在本机进程内完成：无账号、无遥测、无云端解析；卸载或删除数据目录即清除全部状态 |
-| **下载** | 三条链路按链接类型自动路由（yt-dlp 站点解析 / aria2c 分段并行 / eMule ed2k）；分 P、合集、HLS/DASH 自动合并；暂停、断点续传、全局限速；扩展名 / 域名 / 最小体积三重过滤 |
+| **下载** | 两条链路按链接类型自动路由（yt-dlp 站点解析 / aria2c 分段并行）；分 P、合集、HLS/DASH 自动合并；暂停、断点续传、全局限速 |
 | **格式转换** | 80 种目标格式（视频 22 · 音频 20 · 图片 20 · 文档 18），可用性由本机引擎能力探测决定；docx / xlsx / pptx / odt / ods / odp 为纯 Rust 原生解析；支持 NVENC / QSV / AMF 硬件编码 |
 | **字幕** | Whisper.cpp 在本机听写；识别语言为自动检测 + 8 种可多选，可叠加「翻译成英文」轨道；导出 SRT / ASS / VTT / TXT / JSON；模型 6 档按需下载 |
 | **插件** | QuickJS 沙箱，硬上限 16 MB 内存 / 512 KB 栈 / 200 ms 单次执行；白名单 API（无 `require` / `process` / `fetch`）；插件按内容寻址校验 sha256 |
@@ -49,7 +49,7 @@
 
 ### Windows（已发布）
 
-1. 到 [Releases](https://github.com/HuanMoovo/umidl/releases) 下载 `Umidl_x.y.z_x64-setup.exe`（1.8.10 安装包 **4.62 MiB**）
+1. 到 [Releases](https://github.com/HuanMoovo/umidl/releases) 下载 `Umidl_x.y.z_x64-setup.exe`（1.8.11 安装包 **4.46 MiB**）
 2. 首次启动会自动检测 yt-dlp / FFmpeg / Whisper 等运行时工具；缺失的在「设置 → 依赖工具」一键下载（装进 `%APPDATA%/umi-downloader/bin`，**不写入系统 PATH**）
 3. 粘贴链接 → 选清晰度 → 开始下载
 
@@ -67,7 +67,7 @@ npm run tauri:dev      # 开发模式（热更新）
 npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
 ```
 
-- **CI 产物位置**：Actions → `Release` 工作流 → 对应 run 的 Artifacts（`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`）；四个平台的产物已随 [v1.8.10](https://github.com/HuanMoovo/umidl/releases) 挂到 Releases。Intel macOS 的 dmg 由 arm64 runner 交叉编译产出（命令见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+- **CI 产物位置**：Actions → `Release` 工作流 → 对应 run 的 Artifacts（`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`）；四个平台的产物已随 [v1.8.11](https://github.com/HuanMoovo/umidl/releases) 挂到 Releases。Intel macOS 的 dmg 由 arm64 runner 交叉编译产出（命令见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
 - macOS / Linux 目前**只由 CI 编译产出**，尚未在真机做完整回归；aria2 在这两个平台没有官方静态包，安装引导会给出 `brew` / `apt` 指引。
 
 ### 环境要求（源码）
@@ -83,29 +83,24 @@ npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
 
 | 平台 | 架构 | 产物 | 状态 |
 | --- | --- | --- | --- |
-| Windows | x64 | NSIS 安装包 `.exe` | ✅ **已发布**（1.8.10，4.62 MiB，本机真机回归） |
-| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **已发布**（1.8.10，8.96 MiB，CI 构建，未真机回归） |
-| macOS | Intel (x64) | `.dmg` | ✅ **已发布**（1.8.10，9.24 MiB，CI 在 arm64 runner 上交叉编译，未真机回归） |
-| Linux | x64 | `.AppImage` / `.deb` | ✅ **已发布**（1.8.10，deb 6.85 MiB / AppImage 81.4 MiB，CI 构建，未真机回归） |
+| Windows | x64 | NSIS 安装包 `.exe` | ✅ **已发布**（1.8.11，4.46 MiB，本机真机回归） |
+| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **已发布**（1.8.11，8.96 MiB，CI 构建，未真机回归） |
+| macOS | Intel (x64) | `.dmg` | ✅ **已发布**（1.8.11，9.24 MiB，CI 在 arm64 runner 上交叉编译，未真机回归） |
+| Linux | x64 | `.AppImage` / `.deb` | ✅ **已发布**（1.8.11，deb 6.85 MiB / AppImage 81.4 MiB，CI 构建，未真机回归） |
 | Android | — | — | 🔴 实验性作业，需移动端适配，暂不提供产物 |
 
 ---
 
 ## ✨ 功能
 
-### 下载引擎（三引擎自动路由 · 1.5 更新）
+### 下载引擎（双引擎自动路由）
 - **aria2c 分段并行引擎**：直链 / FTP / BitTorrent 种子 / 磁力链接走 16 连接动态分段（1 – 16 可调），支持断电断点续传
 - **yt-dlp 站点解析引擎**：1000+ 站点视频、**分P 与合集**、HLS/DASH 流媒体自动合并
-- **eMule 电驴引擎（1.5 新增）**：ed2k 链接（HTTP/HTTPS/FTP/BT/磁力/HLS/DASH 之后的又一种协议）由托管 eMule 引擎接管，解析链接里的文件名 / 大小 / hash / AICH，交接后回读引擎任务列表核对
-- **ED2K 面板已并入下载页（1.7 更新）**：引擎状态 / 一键安装 eMule 引擎 / 粘贴链接即时解析（hash · 名称 · 大小 · 源数量 · AICH，折叠展示）/「交给引擎下载」都在下载页的紧凑卡片里；输入框粘入 ed2k 链接会即时提示「检测到 ED2K 链接 · 将由 eMule 引擎接管」，单链接下载按钮也能直接走引擎接管
-- 引擎可在设置里指定「自动 / yt-dlp / aria2」，自动模式按链接类型路由（ed2k 恒走电驴引擎）
+- 引擎可在设置里指定「自动 / yt-dlp / aria2」，自动模式按链接类型路由
 - **全局限速（令牌桶）**：设置带宽上限，网关级节流同时作用于 yt-dlp、aria2 与自身请求，下载在后台跑也不影响浏览
-- **智能过滤**：按文件扩展名、域名黑白名单、最小文件大小拦截；被拦下的链接不入队并给出原因
-- **ED2K 电驴引擎（1.7 起内置在下载页）**：`ed2k://` 链接交给托管 eMule 引擎接管，面板内可看引擎状态、一键安装、粘贴即时解析（文件名/大小/源/AICH）并交接
 - **受管 ImageMagick（1.8 新增）**：ffmpeg 写不了的目标（PSD/DDS）交给随包 ImageMagick 完成，仍不污染系统 PATH
-- **多链接 / txt 批量导入（1.6 新增）**：一次粘贴多行链接或导入 txt 文件，按扩展名/域名/大小过滤后批量入队，结果面板给出"已加入 / 拦截 / 跳过"与逐条原因
+- **多链接 / txt 批量导入（1.6 新增）**：一次粘贴多行链接或导入 txt 文件批量入队，结果面板给出「已加入 / 跳过」与失败原因
 - **多线程与并发（1.6 新增）**：同时任务数与每个下载的连接数/分段数/最小分片可调（aria2 与 yt-dlp 分别生效），越界自动限幅
-- **浏览器捕获**：本地回环接口 `http://127.0.0.1:6970/capture?url=…`，浏览器扩展 / 书签脚本 / 命令行一键把链接推进下载队列（**令牌强制校验**：首启自动生成 `capture_token`，请求需带 `X-Umidl-Token: <令牌>` 或 `?token=<令牌>`，可在「设置 › 系统 › 浏览器捕获」查看 / 重置；响应不带 CORS 通配头，网页来源（Origin / Referer 非本机）没有正确令牌会被 403 拒绝并说明原因；仅监听 127.0.0.1）
 - **下载队列**：单一表格式列表（V1.8.7 起移除卡片模式，操作精简为打开 / 定位 / 预览 / 删除)
 
 ### 插件沙箱（JavaScript · 1.5 新增）
@@ -114,7 +109,37 @@ npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
 - **链接解析器**：插件注册的解析器参与「这条链接走哪个引擎」的判定，设置页可实时看到插件意见
 - **通知钩子 + 命令式重试**：`download:done` / `download:error` / `app:start` 事件推给插件，插件可调 `umi.retry(taskId)` 让失败任务重试（自带次数上限，不会无限重试）
 - **插件市场（内容寻址校验）**：内置示例插件一键安装；安装前比对 **sha256**，文件被改动一个字节即拒绝安装
+- **从 GitHub / https 直链安装**：设置页粘贴仓库地址（自动探测仓库根目录 `plugin.json` / `manifest.json`）或 `.js` / 清单直链即可安装；仅 https、单文件 ≤ 5 MB、请求超时 60 s，下载内容只落盘不执行
 - 插件管理界面位于 **设置 → 插件**（1.6 起从侧边栏独立页迁入）
+
+#### 插件包与「从 GitHub 安装」约定
+
+「设置 → 插件」顶部可直接粘贴地址安装，只接受 **https**（`http` 一律拒绝）：单文件 **≤ 5 MB**、请求超时 **60 s**；下载内容**只落盘、不执行**，并且只写入应用数据目录的 `plugins/<id>/` 内。
+
+支持的两种地址：
+
+- **GitHub 仓库**：`https://github.com/<owner>/<repo>`（可带 `.git` 后缀 / 尾部 `/`）→ 自动探测仓库根目录 `main` / `master` 分支下的 `plugin.json` / `manifest.json`
+- **https 直链**：清单 JSON 地址（`entry` 按同目录解析）或 `.js` 脚本地址（插件 id 取文件名）；GitHub 的 `blob` 页面地址会自动转成 raw
+
+**插件包最小约定**：仓库（或直链所在目录）放一个 `plugin.json`（`manifest.json` 同义）：
+
+```json
+{
+  "id": "my-plugin",
+  "name": "我的插件",
+  "version": "1.0.0",
+  "description": "一句话说明",
+  "author": "your-name",
+  "permissions": ["resolve"],
+  "entry": "plugin.js"
+}
+```
+
+- `id` **必填**：字母 / 数字 / `-` `_` `.`，≤ 64 字符；禁止 `..`、`/`、`\` 与绝对路径（净化不通过直接拒绝安装）
+- `entry` **可选**：脚本路径（相对清单所在目录，或 https 直链），默认 `plugin.js`
+- `name` / `version` / `description` / `author` / `permissions` 均可选（默认分别取 `id` / `0.0.0` / 空 / 空 / `[]`）
+
+插件本体就是一个 JavaScript 文件（`entry`），API 与沙箱限制和市场安装完全一致（`umi.log / resolve / registerResolver / on / retry / storage`，无 `require` / `process` / `fetch`）。安装后可在插件页启用 / 停用 / 测试 / 卸载；安装来源记在插件目录 `manifest.json` 的 `source`（`github` / `url` / `market`）与 `source_url` 字段。
 
 ### 视频下载（yt-dlp 内核）
 - 支持 YouTube / Bilibili / Vimeo / TikTok 等 1000+ 站点
@@ -211,7 +236,7 @@ umi-downloader
 │   │   ├── selftest.rs  # 自动化自检系统
 │   │   └── http_testserver.rs # 自检用本地 HTTP 服务
 │   └── tauri.conf.json
-└── scripts/make_icon.py # 生成应用图标
+└── scripts/make_brand_assets.py  # 品牌管线：母版 SVG → PNG/WebP/应用图标
 ```
 
 ---
@@ -292,7 +317,7 @@ python scripts/check_i18n_catalog.py  # 四语言 key 集合一致
 
 本项目以 **GNU Affero General Public License v3.0**（`AGPL-3.0-only`）开源，全文见 [LICENSE](LICENSE)。
 
-一句话理由：Umidl 是纯本地桌面程序，但它带本机 HTTP 捕获接口与可编程插件沙箱——**AGPL 让任何把它包装成网络服务对外提供的人必须交出源码**，而普通用户在自己电脑上使用它不受任何额外限制。
+一句话理由：Umidl 是纯本地桌面程序，但它带一个可编程插件沙箱——**AGPL 让任何把它包装成网络服务对外提供的人必须交出源码**，而普通用户在自己电脑上使用它不受任何额外限制。
 
 ### 第三方工具声明
 
@@ -303,7 +328,6 @@ Umidl 自身只负责调度，**不随包分发**下列第三方程序：它们�
 | yt-dlp | 站点解析与视频下载 | Unlicense（公开发布） |
 | FFmpeg / FFprobe | 转码、封装、探测 | LGPL-2.1-or-later 或 GPL-2.0-or-later（取决于其构建配置） |
 | aria2c | 分段并行下载（HTTP/FTP/BT/磁力） | GPL-2.0-or-later |
-| eMule | ed2k 电驴网络 | GPL-2.0-or-later |
 | ImageMagick | PSD / DDS 等 ffmpeg 写不了的图片格式 | ImageMagick License（Apache-2.0 风格） |
 | pandoc | docx / odt / rtf / epub 等富文本互转 | GPL-2.0-or-later |
 | poppler（pdftotext） | PDF 文本抽取 | GPL-2.0-or-later |

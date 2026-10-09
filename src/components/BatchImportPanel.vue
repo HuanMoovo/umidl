@@ -4,7 +4,7 @@
  *
  *  - 多行文本框：每行一个链接，实时显示「识别到 N 条链接，去重后 M 条」
  *  - 从 txt 文件导入：文件选择 → read_text_file 读回内容填入文本框
- *  - 全部加入队列：调用后端 enqueue_links（过滤 / 去重 / 自动开始都在后端），
+ *  - 全部加入队列：调用后端 enqueue_links（去重 / 自动开始都在后端），
  *    提示文案与统计一律取自后端返回值，前端不自行丢弃任何链接。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -228,7 +228,7 @@ async function importTxt() {
   }
 }
 
-/** 全部加入队列：把整段文本原样交给后端，统计/拦截/跳过全部以后端返回为准 */
+/** 全部加入队列：把整段文本原样交给后端，统计 / 跳过全部以后端返回为准 */
 async function enqueue() {
   if (!parsedUnique.value) {
     message.warning(tr('请粘贴至少一个链接'))
@@ -241,9 +241,8 @@ async function enqueue() {
     const res = await enqueueLinks(text.value, settingsStore.settings.download_dir || null)
     result.value = res
     message.success(
-      tr('已加入 {added} 条，拦截 {blocked} 条，跳过 {skipped} 条', {
+      tr('已加入 {added} 条，跳过 {skipped} 条', {
         added: res.added ?? 0,
-        blocked: res.blocked ?? 0,
         skipped: res.skipped ?? 0,
       }),
     )
@@ -328,7 +327,6 @@ onMounted(() => {
       <span class="flex items-center gap-1">
         <NIcon :size="12" :component="ShieldCheckmarkOutline" />{{ $t('跳过重复链接') }}
       </span>
-      <span>{{ $t('被过滤规则拦截的链接不会入队') }}</span>
     </div>
 
     <div
@@ -367,13 +365,8 @@ onMounted(() => {
         "
       >
         <NIcon :size="13" :component="result.added > 0 ? CheckmarkCircleOutline : AlertCircleOutline" />
-        <span>{{ $t('已加入 {added} 条，拦截 {blocked} 条，跳过 {skipped} 条', { added: result.added, blocked: result.blocked, skipped: result.skipped }) }}</span>
+        <span>{{ $t('已加入 {added} 条，跳过 {skipped} 条', { added: result.added, skipped: result.skipped }) }}</span>
       </div>
-
-      <details v-if="result.blocked_reasons?.length" class="s-border-soft s-surface-2 rounded-lg border px-2.5 py-1.5">
-        <summary class="s-text-2 cursor-pointer text-[11px]">{{ $t('拦截原因') }} · {{ result.blocked_reasons.length }}</summary>
-        <div v-for="(r, i) in result.blocked_reasons" :key="i" class="s-text-3 mt-1 break-all font-mono text-[10px]">{{ r }}</div>
-      </details>
 
       <details v-if="result.errors?.length" class="s-border-soft s-surface-2 rounded-lg border px-2.5 py-1.5">
         <summary class="cursor-pointer text-[11px] text-rose-500">{{ $t('失败') }} · {{ result.errors.length }}</summary>

@@ -8,7 +8,7 @@
  * 这里锁住：① 索引对象 → 取 plugins 数组；② 老形状（直接数组）→ 原样用；③ 异常形状 → 空数组不炸。
  */
 import { describe, expect, it, beforeAll } from 'vitest'
-import { pluginMarketList } from '@/services/plugins'
+import { pluginInstallFromUrl, pluginMarketList } from '@/services/plugins'
 
 const ENTRY = {
   id: 'direct-link-sniffer',
@@ -59,5 +59,49 @@ describe('插件市场列表形状', () => {
     expect(await pluginMarketList()).toEqual([])
     response = null
     expect(await pluginMarketList()).toEqual([])
+  })
+})
+
+/**
+ * 从 GitHub / https 直链安装的命令封装回归
+ *
+ * 页面只负责把地址原样交给后端（净化 / 体积 / 超时 / 只落盘都在 Rust 侧），
+ * 这里锁住命令名与入参形状，避免封装层被改成别的调用签名。
+ */
+describe('插件 URL 安装命令', () => {
+  let calls: { cmd: string; args: unknown }[] = []
+
+  beforeAll(() => {
+    calls = []
+    ;(window as any).__TAURI_INTERNALS__ = {
+      invoke: (cmd: string, args: unknown) => {
+        calls.push({ cmd, args })
+        if (cmd === 'plugin_install_from_url') {
+          return Promise.resolve({
+            id: 'acme-demo',
+            name: 'Acme 演示插件',
+            version: '1.2.3',
+            description: '',
+            enabled: true,
+            sha256: 'a'.repeat(64),
+            source: 'github',
+            installed_at: '2026-10-09T00:00:00+00:00',
+          })
+        }
+        return Promise.reject(new Error(`[test] 未处理 ${cmd}`))
+      },
+      transformCallback: (cb: any) => cb,
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+    }
+  })
+
+  it('把地址原样传给 plugin_install_from_url，并回传后端插件信息', async () => {
+    const r = await pluginInstallFromUrl('https://github.com/acme/umi-plugin')
+    const hit = calls.filter((c) => c.cmd === 'plugin_install_from_url')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].args).toEqual({ url: 'https://github.com/acme/umi-plugin' })
+    expect(r.id).toBe('acme-demo')
+    expect(r.source).toBe('github')
+    expect(r.enabled).toBe(true)
   })
 })

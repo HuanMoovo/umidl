@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import type { AppSettings, QueueLayout } from '@/types'
 import * as ipc from '@/services/ipc'
 import { tr } from '@/i18n'
+import { normalizeAppearanceStyle, normalizeUiMode } from '@/utils/accent'
+import { normalizeTheme } from '@/services/theme'
 
 /* ==================== 队列布局（固定 table） ==================== */
 /**
@@ -37,7 +39,7 @@ export const FALLBACK_SETTINGS: AppSettings = {
   ffmpeg_path: null,
   whisper_path: null,
   whisper_model: 'base',
-  theme: 'system',
+  theme: 'dark',
   accent: 'violet',
   concurrency: 3,
   proxy: null,
@@ -71,6 +73,10 @@ export const FALLBACK_SETTINGS: AppSettings = {
   aria2_split: 16,
   aria2_min_split_mb: 1,
   ytdlp_concurrency: 1,
+  /* 界面模式 / 外观风格（1.10）：默认「简单 + 玻璃拟态」，渐变默认关闭 */
+  ui_mode: 'simple',
+  appearance_style: 'glass',
+  accent_gradient: '',
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -82,12 +88,24 @@ export const useSettingsStore = defineStore('settings', () => {
   const isDark = computed(() => settings.value.theme !== 'light')
   /** 当前队列布局：固定 table（保留该计算属性以兼容既有调用方） */
   const queueLayout = computed<QueueLayout>(() => settings.value.queue_layout ?? DEFAULT_QUEUE_LAYOUT)
+  /** 界面模式（1.10）：simple 简单（默认） | advanced 高级 —— 折叠区组是否可见的唯一状态源 */
+  const uiMode = computed<'simple' | 'advanced'>(() => normalizeUiMode(settings.value.ui_mode))
+  /** 简单模式：默认折叠区组整体不渲染 */
+  const isSimple = computed(() => uiMode.value === 'simple')
+  /** 外观风格（1.10）：glass 玻璃拟态（默认） | mono 黑白简约 */
+  const appearanceStyle = computed<'glass' | 'mono'>(() => normalizeAppearanceStyle(settings.value.appearance_style))
 
   async function load() {
     try {
       const remote = await ipc.getSettings()
       // 后端不会回传 queue_layout，用本地镜像补齐（取完设置仍是上次选的布局）
-      settings.value = { ...FALLBACK_SETTINGS, ...remote, queue_layout: readQueueLayout() }
+      settings.value = {
+        ...FALLBACK_SETTINGS,
+        ...remote,
+        // 历史配置里存过的 'system'（跟随系统已移除）静默回退 dark，不报错
+        theme: normalizeTheme(remote.theme),
+        queue_layout: readQueueLayout(),
+      }
       if (!settings.value.download_dir) {
         settings.value.download_dir = await ipc.defaultDownloadDir()
       }
@@ -130,5 +148,5 @@ export const useSettingsStore = defineStore('settings', () => {
     return queueLayout.value
   }
 
-  return { settings, loaded, saving, isDark, queueLayout, load, save, patch, setQueueLayout }
+  return { settings, loaded, saving, isDark, queueLayout, uiMode, isSimple, appearanceStyle, load, save, patch, setQueueLayout }
 })

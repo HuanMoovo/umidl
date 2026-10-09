@@ -6,13 +6,13 @@
 
 **軽量・美しい・高性能な動画ダウンロード / フォーマット変換 / AI 字幕デスクトップクライアント**
 
-ダウンロード + 変換 + 字幕をワンストップで。**Tauri 2 + Rust + Vue 3** で構築し、インストーラは **4.62 MiB**。すべての処理を**本機**で完結します——アップロードなし、登録なし、トラッキングなし。
+ダウンロード + 変換 + 字幕をワンストップで。**Tauri 2 + Rust + Vue 3** で構築し、インストーラは **4.46 MiB**。すべての処理を**本機**で完結します——アップロードなし、登録なし、トラッキングなし。
 
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-2f81f7.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3fb950.svg)](#-プラットフォームサポート)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org)
-[![Installer size](https://img.shields.io/badge/Installer-5.44%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
+[![Installer size](https://img.shields.io/badge/Installer-4.46%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
 [![i18n](https://img.shields.io/badge/i18n-%E4%B8%AD%20%C2%B7%20EN%20%C2%B7%20%E6%97%A5%20%C2%B7%20FR-8957e5.svg)](#インターフェースとテーマ)
 
 [クイックスタート](#-クイックスタート) · [できること](#-できること) · [機能](#-機能) · [プラットフォームサポート](#-プラットフォームサポート) · [コントリビュート](CONTRIBUTING.md) · [オープンソース紹介ページ](https://huanmoovo.github.io/umidl/) · [ロードマップ](docs/ROADMAP.md)
@@ -20,10 +20,10 @@
 <sub><a href="README.md">简体中文</a> · <a href="README.en.md">English</a> · 日本語</sub>
 
 <a href="https://huanmoovo.github.io/umidl/">
-  <img src="docs/img/home.webp" alt="Umidl 1.8.10 のメイン画面：リンク入力欄、4 種類のタスク件数、3 つの機能入口" width="860" />
+  <img src="docs/img/home.webp" alt="Umidl 1.8.11 のメイン画面：リンク入力欄、4 種類のタスク件数、3 つの機能入口" width="860" />
 </a>
 
-<sub>Umidl 1.8.10 のメイン画面（Windows 実機でのスクリーンショット、サンドボックスのデータディレクトリ）· <a href="https://huanmoovo.github.io/umidl/#screens">7 枚の画面スクリーンショットをすべて見る</a></sub>
+<sub>Umidl 1.8.11 のメイン画面（Windows 実機でのスクリーンショット、サンドボックスのデータディレクトリ）· <a href="https://huanmoovo.github.io/umidl/#screens">7 枚の画面スクリーンショットをすべて見る</a></sub>
 
 </div>
 
@@ -31,12 +31,12 @@
 
 ## 🎯 できること
 
-**「ダウンロード → 変換 → 字幕」の一連の処理を本機で完結**——インストーラは 4.62 MiB（1.8.10 Windows NSIS の実測値）。
+**「ダウンロード → 変換 → 字幕」の一連の処理を本機で完結**——インストーラは 4.46 MiB（1.8.11 Windows NSIS の実測値）。
 
-| 機能 | 現状（1.8.10。いずれもリポジトリとアプリ画面から確認できます） |
+| 機能 | 現状（1.8.11。いずれもリポジトリとアプリ画面から確認できます） |
 | --- | --- |
 | **ローカル処理・アップロードなし** | すべての工程を本機のプロセス内で実行します。アカウントなし、テレメトリなし、クラウドでの解析なし。アンインストールまたはデータディレクトリの削除で状態はすべて消去されます |
-| **ダウンロード** | リンク種別に応じて 3 つの経路へ自動ルーティング（yt-dlp によるサイト解析 / aria2c による分割並列 / eMule ed2k）。パート分割・コレクション・HLS/DASH は自動でマージ。一時停止、レジューム、全体の速度制限。拡張子 / ドメイン / 最小サイズの三重フィルタ |
+| **ダウンロード** | リンク種別に応じて 2 つの経路へ自動ルーティング（yt-dlp によるサイト解析 / aria2c による分割並列）。パート分割・コレクション・HLS/DASH は自動でマージ。一時停止、レジューム、全体の速度制限 |
 | **フォーマット変換** | 80 種類の出力フォーマット（動画 22 · 音声 20 · 画像 20 · ドキュメント 18）。可用性は本機エンジンの能力検出によって決まります。docx / xlsx / pptx / odt / ods / odp は純 Rust によるネイティブ解析。NVENC / QSV / AMF のハードウェアエンコードに対応 |
 | **字幕** | Whisper.cpp が本機上で文字起こしを実行。認識言語は自動検出 + 8 種類から複数選択でき、「英語に翻訳」トラックを重ねられます。SRT / ASS / VTT / TXT / JSON を書き出し。モデルは 6 段階で必要時にダウンロード |
 | **プラグイン** | QuickJS サンドボックス。メモリ 16 MB / スタック 512 KB / 1 回の実行 200 ms というハード上限。ホワイトリスト方式の API（`require` / `process` / `fetch` なし）。プラグインは内容アドレス方式で sha256 を検証 |
@@ -49,7 +49,7 @@
 
 ### Windows（公開済み）
 
-1. [Releases](https://github.com/HuanMoovo/umidl/releases) から `Umidl_x.y.z_x64-setup.exe` をダウンロードします（1.8.10 のインストーラは **4.62 MiB**）
+1. [Releases](https://github.com/HuanMoovo/umidl/releases) から `Umidl_x.y.z_x64-setup.exe` をダウンロードします（1.8.11 のインストーラは **4.46 MiB**）
 2. 初回起動時に yt-dlp / FFmpeg / Whisper などのランタイムツールを自動検出します。不足しているものは「設定 → 依存ツール」からワンクリックでダウンロードできます（`%APPDATA%/umi-downloader/bin` に導入され、**システム PATH には書き込みません**）
 3. リンクを貼り付け → 画質を選択 → ダウンロード開始
 
@@ -67,7 +67,7 @@ npm run tauri:dev      # 開発モード（ホットリロード）
 npm run tauri:build    # ローカルでビルド：.dmg / .AppImage / .deb
 ```
 
-- **CI 成果物の場所**：Actions → `Release` ワークフロー → 該当 run の Artifacts（`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`）。4 プラットフォーム分の成果物は [v1.8.10](https://github.com/HuanMoovo/umidl/releases) に添付済みです。Intel macOS の dmg は arm64 runner 上でのクロスコンパイル製です（コマンドは [CONTRIBUTING.md](CONTRIBUTING.md) 参照）。
+- **CI 成果物の場所**：Actions → `Release` ワークフロー → 該当 run の Artifacts（`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`）。4 プラットフォーム分の成果物は [v1.8.11](https://github.com/HuanMoovo/umidl/releases) に添付済みです。Intel macOS の dmg は arm64 runner 上でのクロスコンパイル製です（コマンドは [CONTRIBUTING.md](CONTRIBUTING.md) 参照）。
 - macOS / Linux は現時点で**CI によるビルド成果物のみ**であり、実機での完全な回帰テストは未実施です。aria2 にはこれら 2 プラットフォーム向けの公式な静的パッケージがないため、インストールガイドでは `brew` / `apt` の手順を示します。
 
 ### 動作環境（ソースからビルドする場合）
@@ -83,29 +83,24 @@ npm run tauri:build    # ローカルでビルド：.dmg / .AppImage / .deb
 
 | プラットフォーム | アーキテクチャ | 成果物 | 状態 |
 | --- | --- | --- | --- |
-| Windows | x64 | NSIS インストーラ `.exe` | ✅ **公開済み**（1.8.10、4.62 MiB、実機で回帰済み） |
-| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **公開済み**（1.8.10、8.96 MiB、CI ビルド、実機での回帰なし） |
-| macOS | Intel (x64) | `.dmg` | ✅ **公開済み**（1.8.10、9.24 MiB、arm64 runner 上で CI がクロスコンパイル、実機での回帰なし） |
-| Linux | x64 | `.AppImage` / `.deb` | ✅ **公開済み**（1.8.10、deb 6.85 MiB / AppImage 81.4 MiB、CI ビルド、実機での回帰なし） |
+| Windows | x64 | NSIS インストーラ `.exe` | ✅ **公開済み**（1.8.11、4.46 MiB、実機で回帰済み） |
+| macOS | Apple Silicon (arm64) | `.dmg` | ✅ **公開済み**（1.8.11、8.96 MiB、CI ビルド、実機での回帰なし） |
+| macOS | Intel (x64) | `.dmg` | ✅ **公開済み**（1.8.11、9.24 MiB、arm64 runner 上で CI がクロスコンパイル、実機での回帰なし） |
+| Linux | x64 | `.AppImage` / `.deb` | ✅ **公開済み**（1.8.11、deb 6.85 MiB / AppImage 81.4 MiB、CI ビルド、実機での回帰なし） |
 | Android | — | — | 🔴 実験的な取り組みであり、モバイル向けの対応が必要なため、現時点では成果物を提供していません |
 
 ---
 
 ## ✨ 機能
 
-### ダウンロードエンジン（3 エンジンの自動ルーティング · 1.5 で更新）
+### ダウンロードエンジン（2 エンジンの自動ルーティング）
 - **aria2c 分割並列エンジン**：直リンク / FTP / BitTorrent トレント / マグネットリンクは 16 接続の動的セグメント（1 ～ 16 で調整可能）を使用し、電源断からのレジュームにも対応します
 - **yt-dlp サイト解析エンジン**：1000 以上のサイトの動画、**パート分割とコレクション**、HLS/DASH ストリーミングを自動でマージします
-- **eMule エンジン（1.5 で追加）**：ed2k リンク（HTTP/HTTPS/FTP/BT/マグネット/HLS/DASH に続くもう 1 つのプロトコル）はアプリが管理する eMule エンジンが引き受け、リンク内のファイル名 / サイズ / ハッシュ / AICH を解析します。引き継ぎ後はエンジンのタスク一覧を読み戻して照合します
-- **ED2K パネルをダウンロードページに統合（1.7 で更新）**：エンジン状態 / eMule エンジンのワンクリックインストール / リンクを貼り付けた際の即時解析（ハッシュ · 名前 · サイズ · ソース数 · AICH、折りたたみ表示）/「エンジンにダウンロードを任せる」は、いずれもダウンロードページのコンパクトなカード内にあります。入力欄に ed2k リンクを貼ると「ED2K リンクを検出しました · eMule エンジンが引き継ぎます」と即時に表示され、単一リンクのダウンロードボタンからもそのままエンジンへ引き継げます
-- エンジンは設定で「自動 / yt-dlp / aria2」から指定でき、自動モードではリンク種別に応じてルーティングします（ed2k は常に eMule エンジンを使用）
+- エンジンは設定で「自動 / yt-dlp / aria2」から指定でき、自動モードではリンク種別に応じてルーティングします
 - **全体の速度制限（トークンバケット）**：帯域の上限を設定すると、ゲートウェイ側の絞り込みが yt-dlp、aria2、自身のリクエストに同時に適用され、バックグラウンドでダウンロードしていても閲覧に影響しません
-- **スマートフィルタ**：ファイル拡張子、ドメインの許可 / 拒否リスト、最小ファイルサイズで遮断します。遮断されたリンクはキューに入らず、その理由が表示されます
-- **ED2K eMule エンジン（1.7 以降はダウンロードページに内蔵）**：`ed2k://` リンクはアプリが管理する eMule エンジンが引き受け、パネル内でエンジン状態の確認、ワンクリックインストール、貼り付けた際の即時解析（ファイル名 / サイズ / ソース / AICH）と引き継ぎができます
 - **管理下の ImageMagick（1.8 で追加）**：ffmpeg では書き出せない形式（PSD/DDS）は、アプリが導入する ImageMagick に任せて処理します。システム PATH は汚しません
-- **複数リンク / txt の一括インポート（1.6 で追加）**：複数行のリンクを一度に貼り付けるか txt ファイルを読み込むと、拡張子 / ドメイン / サイズで絞り込んだうえで一括してキューに投入します。結果パネルには「追加済み / 遮断 / スキップ」と項目ごとの理由が表示されます
+- **複数リンク / txt の一括インポート（1.6 で追加）**：複数行のリンクを一度に貼り付けるか txt ファイルを読み込むと一括してキューに投入します。結果パネルには「追加済み / スキップ」と失敗した理由が表示されます
 - **マルチスレッドと並列実行（1.6 で追加）**：同時タスク数と、ダウンロードごとの接続数 / セグメント数 / 最小分割サイズを調整できます（aria2 と yt-dlp にそれぞれ適用されます）。範囲外の値は自動的に制限されます
-- **ブラウザキャプチャ**：ローカルループバックインターフェース `http://127.0.0.1:6970/capture?url=…`。ブラウザ拡張 / ブックマークレット / コマンドラインからワンクリックでリンクをダウンロードキューに投入できます（**トークンによる強制検証**：初回起動時に `capture_token` を自動生成し、リクエストには `X-Umidl-Token: <トークン>` または `?token=<トークン>` が必要です。「設定 › システム › ブラウザキャプチャ」で確認 / 再生成できます。レスポンスに CORS のワイルドカードヘッダーは付かず、Web ページ由来（Origin / Referer が本機以外）のリクエストは正しいトークンがない場合 403 で拒否され、理由が示されます。監視するのは 127.0.0.1 のみです）
 - **ダウンロードキュー**：単一のテーブル形式リストです（V1.8.7 以降、カード表示は廃止され、操作は開く / 保存先を開く / プレビュー / 削除に整理されました)
 
 ### プラグインサンドボックス（JavaScript · 1.5 で追加）
@@ -211,7 +206,7 @@ umi-downloader
 │   │   ├── selftest.rs  # 自動セルフテスト
 │   │   └── http_testserver.rs # セルフテスト用ローカル HTTP サーバ
 │   └── tauri.conf.json
-└── scripts/make_icon.py # アプリアイコンを生成
+└── scripts/make_brand_assets.py  # ブランド管線：SVG → PNG/WebP/アプリアイコン
 ```
 
 ---
@@ -292,7 +287,7 @@ python scripts/check_i18n_catalog.py  # 4 言語のキー集合が一致する�
 
 本プロジェクトは **GNU Affero General Public License v3.0**（`AGPL-3.0-only`）で公開されています。全文は [LICENSE](LICENSE) を参照してください。
 
-理由を一言で述べると：Umidl は完全にローカルなデスクトップアプリですが、本機の HTTP キャプチャインターフェースとプログラマブルなプラグインサンドボックスを備えています。**AGPL は、これを包んでネットワークサービスとして外部に提供する者にソースコードの開示を義務付けます**が、一般のユーザーが自分のコンピューターで使用する場合に追加の制限はありません。
+理由を一言で述べると：Umidl は完全にローカルなデスクトップアプリですが、プログラマブルなプラグインサンドボックスを備えています。**AGPL は、これを包んでネットワークサービスとして外部に提供する者にソースコードの開示を義務付けます**が、一般のユーザーが自分のコンピューターで使用する場合に追加の制限はありません。
 
 ### サードパーティツールに関する表記
 
@@ -303,7 +298,6 @@ Umidl 自体は処理の呼び出しのみを担当し、以下のサードパ�
 | yt-dlp | サイトの解析と動画のダウンロード | Unlicense（公開配布） |
 | FFmpeg / FFprobe | トランスコード、多重化、プローブ | LGPL-2.1-or-later または GPL-2.0-or-later（ビルド構成による） |
 | aria2c | 分割並列ダウンロード（HTTP/FTP/BT/マグネット） | GPL-2.0-or-later |
-| eMule | ed2k によるファイル共有ネットワーク | GPL-2.0-or-later |
 | ImageMagick | PSD / DDS など ffmpeg では書き出せない画像形式 | ImageMagick License（Apache-2.0 スタイル） |
 | pandoc | docx / odt / rtf / epub などのリッチテキスト相互変換 | GPL-2.0-or-later |
 | poppler（pdftotext） | PDF のテキスト抽出 | GPL-2.0-or-later |

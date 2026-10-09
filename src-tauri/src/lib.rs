@@ -1,13 +1,10 @@
 //! Umidl 后端核心
-pub mod capture;
 pub mod converter;
 pub mod docs;
-pub mod ed2k;
 pub mod plugins;
 pub mod ctx;
 pub mod db;
 pub mod downloader;
-pub mod filters;
 pub mod github;
 /// 本地 HTTP 测试服务：仅供端到端自检使用
 #[cfg(feature = "selftest")]
@@ -1143,50 +1140,6 @@ pub fn run_download_job(
     let s_cancel = s.clone();
     let id_cancel = task_id.clone();
 
-    // ED2K：程序不内嵌电驴协议栈，链接交给受管的 eMule 引擎接管（进度在引擎自己的窗口查看）
-    if crate::ed2k::is_ed2k(&req.url) {
-        let submitted = crate::ed2k::submit(&ctx, &req.url);
-        s.take_pid(&task_id);
-        s.unmark_running(&task_id);
-        let mut t = task.clone();
-        t.speed = None;
-        t.eta = None;
-        if let Ok(link) = crate::ed2k::parse(&req.url) {
-            t.total = Some(link.size);
-            t.title = link.name.clone();
-        }
-        match submitted {
-            Ok(v) => {
-                // BUG-14：这不是「下载完成」，而是「已交给 eMule 引擎接管」——
-                // 用独立状态表达，队列里不再显示「完成 / 100%」（进度只能在引擎窗口看）
-                t.status = TaskStatus::HandedOff;
-                t.error = None;
-                t.progress = 0.0;
-                t.format_note = Some("ED2K · 已交由引擎接管".to_string());
-                logs::log_line(
-                    &ctx.dirs,
-                    "download",
-                    &format!("ED2K · 已交给引擎接管 · {v} · {}", req.url),
-                );
-            }
-            Err(e) => {
-                t.status = TaskStatus::Error;
-                t.error = Some(format!("ED2K 引擎接管失败：{e}"));
-                logs::log_line(
-                    &ctx.dirs,
-                    "download",
-                    &format!("ED2K · 接管失败 · {e} · {}", req.url),
-                );
-            }
-        }
-        emit_task(&app, &t);
-        persist_download(&s, &t);
-        maybe_shutdown_when_done(&s, &app);
-        // 槽位已释放：唤醒排队中的任务（BUG-05）
-        pump_queue(&s, &app);
-        return;
-    }
-
     let engine_label = if downloader::wants_aria2(&req, &ctx.settings) {
         "aria2（16 连接分段并行）"
     } else {
@@ -1247,7 +1200,6 @@ pub fn run_download_job(
             req.url
         ),
     );
-    maybe_shutdown_when_done(&s, &app);
     // 槽位已释放：唤醒排队中的任务（BUG-05）
     pump_queue(&s, &app);
 
@@ -2044,15 +1996,6 @@ pub fn run() {
                 0
             });
             logs::log_line(&dirs, "app", &format!("Umidl {} 启动", env!("CARGO_PKG_VERSION")));
-            // 浏览器捕获接收端（端口 0 = 关闭）
-            if settings.capture_port > 0 {
-                match capture_start(&app.handle().clone(), &settings) {
-                    Ok(port) => logs::log_line(&dirs, "capture", &format!("捕获服务已监听 127.0.0.1:{port}")),
-                    // 失败原因不止写日志：capture_start 会把它记进 CAPTURE_ERROR，
-                    // 设置 › 系统 › 浏览器捕获 会显示可见警告与「换端口重试」按钮（BUG-11）
-                    Err(e) => logs::log_line(&dirs, "capture", &format!("捕获服务启动失败：{e}（设置 › 系统 › 浏览器捕获 可查看状态 / 换端口重试）")),
-                }
-            }
             app.manage(AppState(Arc::new(AppStateInner {
                 dirs,
                 db: Arc::new(db),
@@ -2162,15 +2105,9 @@ pub fn run() {
             run_selftest,
             set_autostart,
             get_autostart,
-            capture_restart,
-            capture_status,
             engine_info,
-            explain_route,
             doc_capabilities,
             probe_document,
-            ed2k_parse,
-            ed2k_engine_status,
-            ed2k_submit,
             enqueue_links,
             convert_formats,
             file_sizes,
@@ -2178,14 +2115,13 @@ pub fn run() {
             plugin_list,
             plugin_market_list,
             plugin_install,
+            plugin_install_from_url,
             plugin_uninstall,
             plugin_set_enabled,
             plugin_test,
             plugin_run_resolvers,
             export_logs,
             check_update,
-            shutdown_system,
-            cancel_shutdown,
         ])
         .build(tauri::generate_context!())
         .expect("Umidl 启动失败")
@@ -2216,172 +2152,6 @@ fn kill_all_engines(app: &tauri::AppHandle) {
 }
 
 /* ═════════════════════ 1.4 新增命令 ═════════════════════ */
-
-/// 捕获服务句柄（全局唯一）
-static CAPTURE: Mutex<Option<capture::CaptureServer>> = Mutex::new(None);
-
-/// 捕获服务最近一次启动失败的原因（None = 正常 / 未启用），供 capture_status 暴露给设置页（BUG-11）
-static CAPTURE_ERROR: Mutex<Option<String>> = Mutex::new(None);
-
-fn set_capture_error(msg: Option<String>) {
-    let mut g = CAPTURE_ERROR.lock().unwrap_or_else(|e| e.into_inner());
-    *g = msg;
-}
-
-/// 启动捕获服务（setup 与命令共用）
-fn capture_start(app: &tauri::AppHandle, settings: &AppSettings) -> Result<u16, String> {
-    let mut g = CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(old) = g.take() {
-        // 必须等旧线程退出（否则监听套接字还占着端口，紧接着重新 bind 会 EADDRINUSE，
-        // 表现成「端口没变却报端口被占用」并弹出误导性的换端口警告）
-        old.stop_and_wait();
-    }
-    if settings.capture_port == 0 {
-        set_capture_error(None);
-        return Ok(0);
-    }
-    // 端口可能刚被上一个监听 / 刚退出的实例释放，Windows 上偶发一瞬 EADDRINUSE：
-    // 先探一下（最多 ~1s），把「瞬时占用」和「真被别的程序占用」区分开（后者仍如实报错，BUG-11）
-    for _ in 0..10 {
-        match std::net::TcpListener::bind(("127.0.0.1", settings.capture_port)) {
-            Ok(probe) => {
-                drop(probe);
-                break;
-            }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
-        }
-    }
-    let dirs = AppDirs::new();
-    // 令牌（BUG-06）：设置为空（首启 / 用户清空）时立刻生成并写回设置文件，
-    // 绝不把空令牌交给捕获服务（capture::start 对空令牌直接报错、拒绝启动）
-    let mut cfg = settings.clone();
-    if cfg.capture_token.trim().is_empty() {
-        cfg = settings::load(&dirs);
-        if cfg.capture_token.trim().is_empty() {
-            cfg.capture_token = capture::generate_token();
-            let _ = settings::save(&dirs, &cfg);
-        }
-    }
-    let app2 = app.clone();
-    let server = capture::start(
-        settings.capture_port,
-        cfg.capture_token.clone(),
-        "Umidl".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        move |payload| {
-            let dirs = AppDirs::new();
-            logs::log_line(
-                &dirs,
-                "capture",
-                &format!("捕获链接：{}（来源 {}）", payload.url, payload.source),
-            );
-            let emit = |queued: bool, blocked: bool, reason: Option<&str>| {
-                let _ = app2.emit(
-                    "capture://url",
-                    serde_json::json!({
-                        "url": &payload.url,
-                        "source": &payload.source,
-                        "queued": queued,
-                        "blocked": blocked,
-                        "reason": reason,
-                    }),
-                );
-            };
-            // 智能过滤：被规则命中只通知、不入队
-            let cur = settings::load(&dirs);
-            let f = filters::Filters::from_settings(&cur);
-            let verdict = f.check_url(&payload.url);
-            if let Some(rule) = verdict.reason() {
-                emit(false, true, Some(rule));
-                return capture::CaptureOutcome::Blocked(rule.to_string());
-            }
-            if !cur.capture_auto_queue {
-                let reason = "自动入队已关闭（设置 › 系统 › 浏览器捕获）";
-                emit(false, false, Some(reason));
-                return capture::CaptureOutcome::Skipped(reason.to_string());
-            }
-            // 同一链接已在队列里 → 跳过，不重复入队
-            let Some(state) = app2.try_state::<AppState>() else {
-                let reason = "应用尚未就绪";
-                emit(false, false, Some(reason));
-                return capture::CaptureOutcome::Skipped(reason.to_string());
-            };
-            if state.0.is_running(&payload.url) {
-                let reason = "该链接已在下载队列中";
-                emit(false, false, Some(reason));
-                return capture::CaptureOutcome::Skipped(reason.to_string());
-            }
-            drop(state);
-            // 真正入队：capture 线程同步等结果（带超时），把真实结果写回 HTTP 响应（BUG-12）
-            let (tx, rx) = std::sync::mpsc::channel();
-            let handle = app2.clone();
-            let url = payload.url.clone();
-            tauri::async_runtime::spawn(async move {
-                let st = handle.state::<AppState>();
-                let req = DownloadRequest {
-                    url,
-                    ..Default::default()
-                };
-                let res = start_download(handle.clone(), st, req).await.map(|_| ());
-                let _ = tx.send(res);
-            });
-            match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                Ok(Ok(())) => {
-                    emit(true, false, None);
-                    capture::CaptureOutcome::Queued
-                }
-                Ok(Err(e)) => {
-                    let reason = format!("入队失败：{e}");
-                    emit(false, false, Some(&reason));
-                    capture::CaptureOutcome::Skipped(reason)
-                }
-                Err(_) => {
-                    let reason = "入队等待超时（结果未确认，详见日志）".to_string();
-                    emit(false, false, Some(&reason));
-                    capture::CaptureOutcome::Skipped(reason)
-                }
-            }
-        },
-    )
-    .map_err(|e| {
-        let msg = format!("监听 127.0.0.1:{} 失败：{e}", settings.capture_port);
-        set_capture_error(Some(msg.clone()));
-        msg
-    })?;
-    let port = server.port();
-    *g = Some(server);
-    set_capture_error(None);
-    Ok(port)
-}
-
-/// 重启捕获服务（设置改动后调用）。
-///
-/// 启动失败不抛错，把原因（如端口被占用）带回前端，设置页据此显示可见警告（BUG-11）。
-#[tauri::command]
-fn capture_restart(app: tauri::AppHandle, state: State<'_, AppState>) -> serde_json::Value {
-    let s = state.0.settings_snapshot();
-    match capture_start(&app, &s) {
-        Ok(port) => serde_json::json!({ "running": port > 0, "port": port, "error": serde_json::Value::Null }),
-        Err(e) => serde_json::json!({ "running": false, "port": 0, "error": e }),
-    }
-}
-
-/// 捕获服务状态（含最近一次启动失败原因，供设置页显示警告 / 换端口重试）
-#[tauri::command]
-fn capture_status() -> serde_json::Value {
-    let port = CAPTURE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|s| s.port())
-        .filter(|p| *p > 0);
-    let error = CAPTURE_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    serde_json::json!({
-        "running": port.is_some(),
-        "port": port.unwrap_or(0),
-        "error": error,
-    })
-}
 
 /// 开机自启动开关
 #[tauri::command]
@@ -2421,8 +2191,8 @@ fn engine_info(state: State<'_, AppState>) -> serde_json::Value {
 
 /* ═════════════════════ 1.6 新增命令：批量导入 / 转换格式目录 ═════════════════════ */
 
-/// 批量导入链接并入队（多行文本 / txt 导入）：逐条过过滤规则后入队。
-/// 返回 { added, blocked, skipped, tasks, blocked_reasons, errors }
+/// 批量导入链接并入队（多行文本 / txt 导入）。
+/// 返回 { added, skipped, tasks, errors }
 #[tauri::command]
 async fn enqueue_links(
     app: AppHandle,
@@ -2431,16 +2201,12 @@ async fn enqueue_links(
     output_dir: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let s = state.0.clone();
-    let cfg = s.settings_snapshot();
-    let filters = crate::filters::Filters::from_settings(&cfg);
 
     let mut added = 0usize;
-    let mut blocked = 0usize;
     let mut skipped = 0usize;
     let mut count = 0usize;
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut tasks: Vec<serde_json::Value> = Vec::new();
-    let mut blocked_reasons: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
     // 注释按**整行**忽略：只按空白/逗号切词会把注释文字的后半截（逗号之后的词）当成链接入队。
@@ -2467,12 +2233,6 @@ async fn enqueue_links(
             skipped += 1;
             continue;
         }
-        let verdict = filters.check_url(line);
-        if let Some(r) = verdict.reason() {
-            blocked += 1;
-            blocked_reasons.push(format!("{line} · {r}"));
-            continue;
-        }
         if s.is_running(line) {
             skipped += 1;
             continue;
@@ -2497,10 +2257,8 @@ async fn enqueue_links(
 
     Ok(serde_json::json!({
         "added": added,
-        "blocked": blocked,
         "skipped": skipped,
         "tasks": tasks,
-        "blocked_reasons": blocked_reasons,
         "errors": errors,
     }))
 }
@@ -2540,7 +2298,7 @@ fn file_sizes(paths: Vec<String>) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/* ═════════════════════ 新增命令：文档转换 / ED2K / 插件沙箱 ═════════════════════ */
+/* ═════════════════════ 新增命令：文档转换 / 插件沙箱 ═════════════════════ */
 
 /// 文档转换能力：原生格式 + pandoc / poppler 是否就绪
 #[tauri::command]
@@ -2554,34 +2312,6 @@ fn doc_capabilities(state: State<'_, AppState>) -> serde_json::Value {
 #[tauri::command]
 fn probe_document(path: String) -> serde_json::Value {
     crate::docs::probe_document(&path)
-}
-
-/// 解析 ed2k 链接（粘贴即时预览）
-#[tauri::command]
-fn ed2k_parse(link: String) -> Result<serde_json::Value, String> {
-    match crate::ed2k::parse(&link) {
-        Ok(l) => Ok(serde_json::to_value(l).unwrap_or(serde_json::Value::Null)),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-/// ED2K 引擎状态（eMule / mlnet 是否安装、是否在运行）
-#[tauri::command]
-fn ed2k_engine_status(state: State<'_, AppState>) -> serde_json::Value {
-    let s = state.0.clone();
-    let ctx = build_ctx(&s, None);
-    crate::ed2k::engine_status(&ctx)
-}
-
-/// 把 ed2k 链接交给引擎接管
-#[tauri::command]
-fn ed2k_submit(state: State<'_, AppState>, link: String) -> Result<serde_json::Value, String> {
-    let s = state.0.clone();
-    let ctx = build_ctx(&s, None);
-    match crate::ed2k::submit(&ctx, &link) {
-        Ok(v) => Ok(v),
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 /// 插件沙箱自述（引擎 / 内存上限 / 脚本时间预算）
@@ -2612,6 +2342,19 @@ fn plugin_install(app: AppHandle, state: State<'_, AppState>, id: String) -> Res
     let s = state.0.clone();
     let ctx = build_ctx(&s, Some(&app));
     crate::plugins::install_from_market(&ctx, &id).map_err(|e| e.to_string())
+}
+
+/// 从 GitHub 仓库 / https 直链安装插件
+/// （仅 https、≤ 5 MB、60 s 超时；下载内容只落盘不执行，只写现有插件目录内）
+#[tauri::command]
+fn plugin_install_from_url(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<serde_json::Value, String> {
+    let s = state.0.clone();
+    let ctx = build_ctx(&s, Some(&app));
+    crate::plugins::install_from_url(&ctx, &url).map_err(|e| e.to_string())
 }
 
 /// 卸载插件
@@ -2651,36 +2394,6 @@ fn plugin_run_resolvers(app: AppHandle, state: State<'_, AppState>, url: String)
     crate::plugins::run_resolvers(&ctx, &url)
 }
 
-/// 解释一条链接会走哪个引擎、是否会被过滤规则拦下
-#[tauri::command]
-fn explain_route(state: State<'_, AppState>, url: String) -> serde_json::Value {
-    let s = state.0.settings_snapshot();
-    let filters = crate::filters::Filters::from_settings(&s);
-    let verdict = filters.check_url(&url);
-    let req = DownloadRequest {
-        url: url.clone(),
-        ..Default::default()
-    };
-    let aria2 = downloader::wants_aria2(&req, &s);
-    let ed2k = crate::ed2k::is_ed2k(&url);
-    let ctx = build_ctx(&state.0, None);
-    let plugins = crate::plugins::run_resolvers(&ctx, &url);
-    serde_json::json!({
-        "engine": if ed2k { "ed2k" } else if aria2 { "aria2" } else { "ytdlp" },
-        "engine_label": if ed2k {
-            "eMule · 电驴引擎接管（ed2k）"
-        } else if aria2 {
-            "aria2 · 16 连接分段并行（支持断点续传 / BT / 磁力 / FTP）"
-        } else {
-            "yt-dlp · 站点解析（1000+ 站点 / HLS / DASH）"
-        },
-        "blocked": verdict.is_block(),
-        "reason": verdict.reason(),
-        "ed2k": ed2k,
-        "plugins": plugins,
-    })
-}
-
 /// 诊断摘要（导出日志用）
 fn build_diag_summary(s: &AppStateInner) -> String {
     let cfg = s.settings_snapshot();
@@ -2695,8 +2408,7 @@ fn build_diag_summary(s: &AppStateInner) -> String {
         "版本: {}\n平台: {} {}\n数据目录: {}\n下载目录: {}\n\n\
          yt-dlp: {}\nffmpeg: {}\nffprobe: {}\nwhisper: {}\naria2c: {}\n\n\
          引擎: {} · 分段: 16 · 全局限速: {} KB/s · 代理模式: {} · 分P模式: {}\n\
-         过滤: 扩展名[{}] 域名黑[{}] 域名白[{}] 最小体积[{} MB]\n\
-         捕获端口: {} · 自启动: {}\n",
+         自启动: {}\n",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -2711,11 +2423,6 @@ fn build_diag_summary(s: &AppStateInner) -> String {
         if cfg.speed_limit_enabled { cfg.speed_limit_kb } else { 0 },
         cfg.proxy_mode,
         cfg.playlist_mode,
-        cfg.filter_ext_block,
-        cfg.filter_domain_block,
-        cfg.filter_domain_allow,
-        cfg.filter_min_size_mb,
-        cfg.capture_port,
         cfg.launch_at_login,
     )
 }
@@ -2730,140 +2437,154 @@ fn export_logs(state: State<'_, AppState>, dest: String) -> Result<String, Strin
     Ok(out)
 }
 
-/// 语义化版本比较：a > b → 1；相等 → 0；a < b → -1
-fn cmp_version(a: &str, b: &str) -> i32 {
-    let parse = |v: &str| -> Vec<i64> {
-        v.trim()
-            .trim_start_matches('v')
-            .split(['.', '-', '+'])
-            .map(|x| x.parse::<i64>().unwrap_or(0))
-            .collect()
-    };
-    let (va, vb) = (parse(a), parse(b));
-    for i in 0..va.len().max(vb.len()) {
-        let x = va.get(i).copied().unwrap_or(0);
-        let y = vb.get(i).copied().unwrap_or(0);
+/// 本仓库 GitHub Releases 最新版接口（公开 API，无需鉴权；必须带 User-Agent，否则 GitHub 直接 403）
+const UPDATE_API_URL: &str = "https://api.github.com/repos/HuanMoovo/umidl/releases/latest";
+/// GitHub API 要求的 User-Agent（缺省会被拒）
+const UPDATE_USER_AGENT: &str = "Umidl";
+
+/// 纯函数：版本串 → 数字段。去掉 v / V 前缀，按 '.' 分段，每段必须全是数字。
+/// 非法（空串 / 空段 / 非数字段，如 "nightly"、"v1.8.x"）返回 None —— 调用方据此报「无法识别版本号」，
+/// 绝不把识别不了的 tag 当成「已最新」。
+pub fn parse_version_tag(raw: &str) -> Option<Vec<u64>> {
+    let t = raw.trim().trim_start_matches(['v', 'V']);
+    if t.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for seg in t.split('.') {
+        if seg.is_empty() || !seg.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        out.push(seg.parse::<u64>().ok()?);
+    }
+    Some(out)
+}
+
+/// 纯函数：tag 与 current 比较 —— tag 更新 → Some(1)；相同 → Some(0)；更旧 → Some(-1)；tag 非法 → None。
+/// 段数不一致时缺段按 0 处理（v1.8 == 1.8.0）。
+pub fn compare_versions(tag: &str, current: &str) -> Option<i32> {
+    let a = parse_version_tag(tag)?;
+    let b = parse_version_tag(current)?;
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
         if x != y {
-            return if x > y { 1 } else { -1 };
+            return Some(if x > y { 1 } else { -1 });
         }
     }
-    0
+    Some(0)
 }
 
-/// 检查更新（读取设置里的更新清单 JSON）
+/// Release notes 截断：界面只有一小块位置，600 字符足够说清更新内容
+fn truncate_release_notes(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let mut out: String = t.chars().take(600).collect();
+    if t.chars().count() > 600 {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// 检查更新：GET 本仓库的 GitHub Releases latest，取 tag_name / html_url 与当前版本比较。
+/// 与工具下载 / 封面缓存同一套代理决策（effective_proxy + client_proxy_plan，端口拒连自动回退直连），
+/// 不用裸 reqwest 直连 —— 否则开着代理的用户会连不上 api.github.com。
 #[tauri::command]
 async fn check_update(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let s = state.0.settings_snapshot();
-    let url = s.update_manifest_url.trim().to_string();
-    if url.is_empty() {
-        return Ok(serde_json::json!({
-            "ok": false,
-            "current": env!("CARGO_PKG_VERSION"),
-            "error": "尚未配置更新清单地址（设置 → 系统与更新）"
-        }));
-    }
+    let s = state.0.clone();
     ratelimit::LIMITER.acquire(4096).await;
-    let client = reqwest::Client::builder()
+    tauri::async_runtime::spawn_blocking(move || fetch_latest_release(&s))
+        .await
+        .map_err(|e| format!("检查更新任务异常：{e}"))
+}
+
+/// 实际抓取（阻塞版，跑在 spawn_blocking 里）：任何失败都折叠成 { ok:false, current, error } 的可读结果
+fn fetch_latest_release(state: &AppStateInner) -> serde_json::Value {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let url = UPDATE_API_URL;
+    let ctx = build_ctx(state, None);
+
+    let plan = downloader::client_proxy_plan(downloader::effective_proxy(&ctx, url).as_deref());
+    let mut builder = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?;
-    match client.get(&url).send().await {
-        Ok(resp) => match resp.text().await {
-            Ok(txt) => match serde_json::from_str::<serde_json::Value>(&txt) {
-            Ok(j) => {
-                let latest = j.get("version").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let current = env!("CARGO_PKG_VERSION").to_string();
-                Ok(serde_json::json!({
-                    "ok": true,
-                    "current": current,
-                    "latest": latest,
-                    "has_update": !latest.is_empty() && cmp_version(&latest, &current) > 0,
-                    "url": j.get("url").and_then(|v| v.as_str()),
-                    "notes": j.get("notes").and_then(|v| v.as_str()),
-                }))
-            }
-            Err(e) => Ok(serde_json::json!({ "ok": false, "error": format!("清单格式错误：{e}") })),
-            },
-            Err(e) => Ok(serde_json::json!({ "ok": false, "error": format!("读取清单失败：{e}") })),
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .user_agent(UPDATE_USER_AGENT);
+    match &plan.proxy {
+        Some(px) => match reqwest::Proxy::all(px) {
+            Ok(p) => builder = builder.proxy(p),
+            Err(_) => builder = builder.no_proxy(),
         },
-        Err(e) => Ok(serde_json::json!({ "ok": false, "error": format!("无法连接更新服务：{e}") })),
+        None if plan.no_proxy => builder = builder.no_proxy(),
+        None => {}
     }
-}
-
-/// 关机（默认 60 秒后，可用 shutdown /a 取消）
-#[tauri::command]
-fn shutdown_system(state: State<'_, AppState>, delay_secs: u64) -> Result<(), String> {
-    let d = delay_secs.clamp(0, 3600);
-    #[cfg(windows)]
-    {
-        std::process::Command::new("shutdown")
-            .args(["/s", "/t", &d.to_string()])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = d;
-        return Err("当前平台暂不支持自动关机".into());
-    }
-    logs::log_line(&state.0.dirs, "power", &format!("已计划 {d} 秒后关机"));
-    Ok(())
-}
-
-/// 取消已计划的关机
-#[tauri::command]
-fn cancel_shutdown() -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        std::process::Command::new("shutdown")
-            .arg("/a")
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// 全部任务完成 + 设置开启 → 计划关机
-fn maybe_shutdown_when_done(s: &AppStateInner, app: &tauri::AppHandle) {
-    let settings = match s.settings.lock() {
-        Ok(g) => g.clone(),
-        Err(_) => return,
+    let client = match builder.build() {
+        Ok(c) => c,
+        Err(e) => {
+            return serde_json::json!({ "ok": false, "current": current, "error": format!("无法创建网络客户端：{e}") })
+        }
     };
-    if !settings.shutdown_when_done {
-        return;
-    }
-    if s.running.lock().map(|g| !g.is_empty()).unwrap_or(true) {
-        return;
-    }
-    let busy = s
-        .db
-        .list_downloads()
-        .map(|v| {
-            v.iter().any(|t| {
-                matches!(
-                    t.status,
-                    TaskStatus::Pending
-                        | TaskStatus::Parsing
-                        | TaskStatus::Downloading
-                        | TaskStatus::Converting
-                        | TaskStatus::Extracting
-                        | TaskStatus::Transcribing
-                )
-            })
-        })
-        .unwrap_or(true);
-    if busy {
-        return;
-    }
-    logs::log_line(&s.dirs, "power", "全部任务完成 → 60 秒后关机");
-    notify_finish("Umidl · 即将关机", "全部任务已完成，60 秒后关机");
-    let _ = app.emit("power://shutdown-scheduled", serde_json::json!({ "delay": 60 }));
-    #[cfg(windows)]
+
+    let resp = match client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
     {
-        let _ = std::process::Command::new("shutdown")
-            .args(["/s", "/t", "60"])
-            .spawn();
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::json!({ "ok": false, "current": current, "error": format!("无法连接更新服务：{e}") })
+        }
+    };
+    if !resp.status().is_success() {
+        return serde_json::json!({
+            "ok": false,
+            "current": current,
+            "error": format!("更新服务返回 HTTP {}（仓库暂无 Release 或接口限流）", resp.status().as_u16()),
+        });
     }
+    let body = match resp.text() {
+        Ok(t) => t,
+        Err(e) => {
+            return serde_json::json!({ "ok": false, "current": current, "error": format!("读取更新信息失败：{e}") })
+        }
+    };
+    let release: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(j) => j,
+        Err(e) => {
+            return serde_json::json!({ "ok": false, "current": current, "error": format!("更新信息格式错误：{e}") })
+        }
+    };
+
+    let tag = release
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if tag.is_empty() {
+        return serde_json::json!({ "ok": false, "current": current, "error": "最新 Release 缺少 tag_name" });
+    }
+    let has_update = match compare_versions(&tag, &current) {
+        Some(c) => c > 0,
+        None => {
+            return serde_json::json!({
+                "ok": false,
+                "current": current,
+                "error": format!("无法识别更新版本号：{tag}"),
+            })
+        }
+    };
+    let html_url = release.get("html_url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let notes = release.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    serde_json::json!({
+        "ok": true,
+        "current": current,
+        "latest": tag,
+        "has_update": has_update,
+        "url": if html_url.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(html_url) },
+        "notes": truncate_release_notes(notes),
+    })
 }
 
 
@@ -3277,6 +2998,48 @@ mod fix18_tests {
         let gone = dir.join("nope.srt");
         let e = open_path(gone.to_string_lossy().to_string()).unwrap_err();
         assert!(e.contains("路径不存在"), "错误文案要明说路径不存在：{e}");
+    }
+
+    /// 更新检查：tag_name 解析 —— 去 v 前缀 / 按数字段；非法 tag 一律 None
+    #[test]
+    fn update_tag_parsing_requires_numeric_segments() {
+        assert_eq!(parse_version_tag("v1.8.11"), Some(vec![1, 8, 11]));
+        assert_eq!(parse_version_tag("1.8.11"), Some(vec![1, 8, 11]));
+        assert_eq!(parse_version_tag("  V2.0  "), Some(vec![2, 0]));
+        // 非法 tag：非数字段 / 空段 / 空串 → None（界面据此报「无法识别更新版本号」）
+        assert_eq!(parse_version_tag("nightly"), None);
+        assert_eq!(parse_version_tag("release-2024"), None);
+        assert_eq!(parse_version_tag("v1.8.x"), None);
+        assert_eq!(parse_version_tag("v1..2"), None);
+        assert_eq!(parse_version_tag("v"), None);
+        assert_eq!(parse_version_tag(""), None);
+        // 当前版本（Cargo.toml）本身必须可解析，否则更新检查永远失败
+        assert!(parse_version_tag(env!("CARGO_PKG_VERSION")).is_some());
+    }
+
+    /// 更新检查：版本比较纯函数 —— 新版本 / 相同 / 旧版本 / 非法 tag（≥4 例）
+    #[test]
+    fn update_version_compare_newer_same_older_invalid() {
+        // 新版本：tag > 当前 → 1
+        assert_eq!(compare_versions("v1.8.12", "1.8.11"), Some(1));
+        assert_eq!(compare_versions("1.9.0", "1.8.11"), Some(1));
+        assert_eq!(compare_versions("v2.0.0", "v1.99.99"), Some(1));
+        // 相同：前缀带不带都一样 → 0
+        assert_eq!(compare_versions("v1.8.11", "1.8.11"), Some(0));
+        assert_eq!(compare_versions("V1.8.11", "v1.8.11"), Some(0));
+        // 旧版本 → -1
+        assert_eq!(compare_versions("v1.8.10", "1.8.11"), Some(-1));
+        assert_eq!(compare_versions("v1.7.99", "1.8.0"), Some(-1));
+        // 非法 tag → None（绝不误报「已最新」或「有新版本」）
+        assert_eq!(compare_versions("nightly", "1.8.11"), None);
+        assert_eq!(compare_versions("", "1.8.11"), None);
+        assert_eq!(compare_versions("v1.8.x", "1.8.11"), None);
+        // 段数不一致：缺段按 0（v1.8 == 1.8.0；多一段非零则更大）
+        assert_eq!(compare_versions("v1.8", "1.8.0"), Some(0));
+        assert_eq!(compare_versions("v1.8.0.1", "1.8"), Some(1));
+        // 界面展示的 notes 截断：空 → None；超长截到 600 + 省略号
+        assert_eq!(truncate_release_notes("   "), None);
+        assert!(truncate_release_notes(&"更".repeat(700)).unwrap().chars().count() <= 601);
     }
 }
 

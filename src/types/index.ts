@@ -14,8 +14,6 @@ export type TaskStatus =
   | 'done'
   | 'error'
   | 'canceled'
-  /** ED2K：链接已交给 eMule 引擎接管（不是「下载完成」） */
-  | 'handed_off'
 
 /** 下载队列的展示布局：card = 卡片流（默认），table = 详细表格 */
 export type QueueLayout = 'card' | 'table'
@@ -157,11 +155,6 @@ export interface ToolStatus {
   origin?: string | null
   /** 本平台是否可自动下载安装（false = 无官方静态包，不显示「下载」按钮） */
   installable?: boolean
-  /**
-   * 探活方式：`exec` = 启动一次问版本；`exists` = GUI 程序（eMule）只核对文件、
-   * 不启动探测，版本号因此显示为「未知」
-   */
-  probe?: 'exec' | 'exists' | null
 }
 
 /** 单个工具的安装 / 校验结果（批量「下载所选」逐条返回，一条失败不影响其它） */
@@ -206,8 +199,8 @@ export interface AppSettings {
   ffmpeg_path?: string | null
   whisper_path?: string | null
   whisper_model: string
-  /** dark | light | system */
-  theme: 'dark' | 'light' | 'system'
+  /** dark | light（「跟随系统」已移除：历史 'system' 值读取时回退 dark） */
+  theme: 'dark' | 'light'
   /** 强调色 */
   accent: string
   /** 界面语言：zh | en | ja | fr */
@@ -254,20 +247,9 @@ export interface AppSettings {
   speed_limit_kb?: number
   /** 代理模式：system | none | custom */
   proxy_mode?: string
-  /** 智能过滤：扩展名黑名单 / 域名黑名单 / 域名白名单（英文逗号分隔），最小体积 MB */
-  filter_ext_block?: string
-  filter_domain_block?: string
-  filter_domain_allow?: string
-  filter_min_size_mb?: number
-  /** 浏览器捕获：本地端口、可选令牌、是否自动入队 */
-  capture_port?: number
-  capture_token?: string
-  capture_auto_queue?: boolean
-  /** 系统集成：开机自启动 / 全部完成后关机 / 启动时检查更新 / 更新清单地址 */
+  /** 系统集成：开机自启动 / 启动时检查更新 */
   launch_at_login?: boolean
-  shutdown_when_done?: boolean
   check_update_on_start?: boolean
-  update_manifest_url?: string
   /** 自定义强调色（hex，空 = 用预设） */
   accent_custom?: string
 
@@ -284,7 +266,21 @@ export interface AppSettings {
   /* ── 1.9 新增：受管工具目录 ── */
   /** 受管工具安装目录（绝对路径；空 = 数据目录下的 bin/）。所有工具解析/调用只认它 */
   tool_dir?: string
+
+  /* ── 1.10 新增：界面模式 / 外观风格 / 自定义渐变 ── */
+  /** 界面模式：simple 简单（默认，只显示常用项） | advanced 高级（全部可见） */
+  ui_mode?: UiMode | string
+  /** 外观风格：glass 玻璃拟态（默认） | mono 黑白简约 */
+  appearance_style?: AppearanceStyle | string
+  /** 自定义渐变强调色 "起色,止色"（两个十六进制色；空 = 不用渐变） */
+  accent_gradient?: string
 }
+
+/** 界面模式（1.10）：简单只显示常用项，高级可见全部 */
+export type UiMode = 'simple' | 'advanced'
+
+/** 外观风格（1.10）：glass = 玻璃拟态（现状），mono = 黑白简约 */
+export type AppearanceStyle = 'glass' | 'mono'
 
 export interface MediaProbe {
   path: string

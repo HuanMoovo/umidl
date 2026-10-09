@@ -95,7 +95,7 @@ jobs:
       - name: 前端门禁（类型检查 + 单元测试）
         run: npx vue-tsc --noEmit && npx vitest run
 
-      - name: Rust 单元测试（令牌桶 / 过滤器 / 捕获解析 / aria2 参数）
+      - name: Rust 单元测试（令牌桶 / 下载参数解析 / 文档 / 字幕 / 插件沙箱）
         working-directory: src-tauri
         run: cargo test --lib
 

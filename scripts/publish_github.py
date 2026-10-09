@@ -176,7 +176,7 @@ def main():
         "message": os.environ.get("UMIDL_COMMIT_MSG") or (
             f"Umidl {VERSION} — 源码同步（Windows / macOS / Linux）\n\n"
             "本地化视频下载 / 格式转换 / AI 字幕桌面客户端。\n"
-            "Tauri 2 + Rust + Vue 3；三引擎（yt-dlp / aria2c / eMule）；"
+            "Tauri 2 + Rust + Vue 3；双引擎（yt-dlp / aria2c）；"
             "外部工具全部托管到用户数据目录，不污染系统 PATH。"
         ),
         "tree": tree["sha"],

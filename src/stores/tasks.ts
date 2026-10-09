@@ -79,7 +79,7 @@ export const useTaskStore = defineStore('tasks', () => {
 
   /**
    * 「清理已完成 / 清空队列」的本地摘行，与后端 `clear_downloads(which)` 同口径：
-   * `done` = 只摘终态行（done / error / canceled / handed_off），`all` = 整列清空。
+   * `done` = 只摘终态行（done / error / canceled），`all` = 整列清空。
    */
   function dropDownloads(which: 'done' | 'all') {
     dropWhere(downloads.value, which === 'all' ? () => true : isFinishedDownload)

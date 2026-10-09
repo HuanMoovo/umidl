@@ -36,7 +36,6 @@ const STATUSES: ToolStatus[] = [
   st('aria2', false, { size_hint: '约 5 MB' }),
   st('pandoc', false, { size_hint: '约 35 MB' }),
   st('poppler', false, { size_hint: '约 42 MB' }),
-  st('emule', false, { size_hint: '约 4 MB' }),
   st('imagemagick', false, { installable: false }),
   st('whisper-model', true, { size_hint: '75 MB ~ 1.6 GB' }),
 ]
@@ -44,7 +43,7 @@ const STATUSES: ToolStatus[] = [
 describe('依赖工具：勾选与下载', () => {
   it('只有可自动安装的工具能勾选（ffprobe / imagemagick 不在列）', () => {
     const names = selectableTools(STATUSES).map((t) => t.name)
-    expect(names).toEqual(['yt-dlp', 'ffmpeg', 'whisper', 'aria2', 'pandoc', 'poppler', 'emule', 'whisper-model'])
+    expect(names).toEqual(['yt-dlp', 'ffmpeg', 'whisper', 'aria2', 'pandoc', 'poppler', 'whisper-model'])
     expect(names).not.toContain('ffprobe')
     expect(names).not.toContain('imagemagick')
   })
@@ -74,13 +73,12 @@ describe('依赖工具：勾选与下载', () => {
   })
 
   it('批量入口：全选 / 只选未装 / 清空', () => {
-    expect(selectionFor(STATUSES, 'all')).toHaveLength(8)
+    expect(selectionFor(STATUSES, 'all')).toHaveLength(7)
     expect(selectionFor(STATUSES, 'missing')).toEqual([
       'whisper',
       'aria2',
       'pandoc',
       'poppler',
-      'emule',
     ])
     expect(selectionFor(STATUSES, 'none')).toEqual([])
   })
