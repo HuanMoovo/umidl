@@ -102,6 +102,16 @@ describe('字幕产物命名（与 Rust subtitle.rs 同一套规则）', () => {
 describe('队列行的产物路径（「打开文件 / 在文件夹中显示」的目标）', () => {
   const DIR = String.raw`D:\Media Files\Videos\Umidl`
 
+  it('云端译文沿用实际路径，包括引擎后缀和并发保留文件名', () => {
+    for (const name of ['clip.zh-to-en.cloud.srt', 'clip (1).zh-to-en.cloud.vtt']) {
+      const actual = `${DIR}\\${name}`
+      expect(rowProductPath({
+        video_path: `${DIR}\\clip.mp4`, language: 'zh', model: 'cloud:whisper-1',
+        subtitle_path: actual, translated: true,
+      })).toBe(actual)
+    }
+  })
+
   it('普通行：用记录里那份（历史目录 / output_dir 都保留）', () => {
     expect(
       rowProductPath({

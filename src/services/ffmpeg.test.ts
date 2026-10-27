@@ -18,6 +18,30 @@ const base = (o: Partial<ConvertOptions> = {}): ConvertOptions => ({
 })
 
 describe('buildFfmpegArgs', () => {
+  it('honors an explicit video bitrate instead of keeping stream copy', () => {
+    const args = buildFfmpegArgs(base({ videoCodec: 'copy', audioCodec: 'copy', bitrate: '2M' }))
+    expect(args[args.indexOf('-c:v') + 1]).toBe('libx264')
+    expect(args[args.indexOf('-b:v') + 1]).toBe('2M')
+  })
+  it('re-encodes a copied video stream when scaling is requested', () => {
+    const args = buildFfmpegArgs(base({ videoCodec: 'copy', audioCodec: 'copy', resolution: '1280x720' }))
+    expect(args[args.indexOf('-c:v') + 1]).toBe('libx264')
+    expect(args[args.indexOf('-c:a') + 1]).toBe('copy')
+  })
+
+  it('re-encodes copied audio when sample rate or speed changes', () => {
+    const args = buildFfmpegArgs(base({ videoCodec: 'copy', audioCodec: 'copy', speed: 1.5, sampleRate: 48000 }))
+    expect(args[args.indexOf('-c:v') + 1]).toBe('libx264')
+    expect(args[args.indexOf('-c:a') + 1]).toBe('aac')
+    expect(args[args.indexOf('-af') + 1]).toContain('atempo=1.5000')
+  })
+
+  it('chooses encoders that match Ogg and Windows Media containers', () => {
+    expect(suggestCodecs('ogv', false)).toEqual({ video: 'libtheora', audio: 'libvorbis' })
+    expect(suggestCodecs('wmv', false)).toEqual({ video: 'wmv2', audio: 'wmav2' })
+    expect(audioFor('aiff')).toBe('pcm_s16be')
+  })
+
   it('基础参数包含输入输出与进度管道', () => {
     const a = buildFfmpegArgs(base({ outputFile: 'C:/out/a.mp4' }))
     expect(a).toContain('-i')

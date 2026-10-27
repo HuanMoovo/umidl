@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { applyTheme, themeModes } from '@/services/theme'
 import type { ThemeMode } from '@/services/theme'
 import { syncWindowTheme } from '@/services/windowTheme'
+import { version as appVersion } from '../../package.json'
 const { t: tr } = useI18n()
 
 const route = useRoute()
@@ -36,17 +37,17 @@ async function setTheme(mode: ThemeMode) {
 </script>
 
 <template>
-  <header class="flex h-14 shrink-0 items-center justify-between border-b px-6" style="border-color: var(--umi-border-soft)">
-    <div class="flex items-baseline gap-3">
-      <h1 class="s-text text-[15px] font-semibold tracking-wide">{{ $t(title) }}</h1>
-      <span v-if="running > 0" class="flex items-center gap-1.5 text-[11px] text-accent">
+  <header class="flex h-14 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-6" style="border-color: var(--umi-border-soft)">
+    <div class="flex min-w-0 items-baseline gap-3">
+      <h1 class="s-text truncate text-[15px] font-semibold tracking-wide">{{ $t(title) }}</h1>
+      <span v-if="running > 0" class="hidden items-center gap-1.5 text-[11px] text-accent sm:flex">
         <span class="h-1.5 w-1.5 animate-ping rounded-full bg-umi-400" />
         {{ $t('{n} 个任务进行中', { n: running }) }}
       </span>
     </div>
 
     <div class="flex items-center gap-2">
-      <div class="umi-chip !text-[10.5px] tabular-nums">v1.8.11</div>
+      <div class="umi-chip !text-[10.5px] tabular-nums">v{{ appVersion }}</div>
 
       <!-- 昼夜切换：图标 + 提示 -->
       <div class="umi-seg" role="group" :aria-label="$t('昼夜模式切换')">

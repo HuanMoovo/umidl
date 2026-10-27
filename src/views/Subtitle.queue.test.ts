@@ -167,6 +167,8 @@ function fileSizes(paths: string[]) {
 }
 
 function installInvokeStub() {
+  // Include the event-plugin cleanup boundary used when this page unmounts.
+  ;(window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }
   let cbId = 0
   const handlers: Record<string, (args: any) => unknown> = {
     list_downloads: () => [],

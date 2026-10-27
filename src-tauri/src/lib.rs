@@ -1,4 +1,11 @@
 //! Umidl 后端核心
+pub mod asr;
+pub mod asr_jobs;
+pub mod local_asr;
+pub mod cloud_asr;
+pub mod cloud_vendor_cn;
+pub mod cloud_vendor_sync;
+pub mod cloud_vendor_assembly;
 pub mod converter;
 pub mod docs;
 pub mod plugins;
@@ -1473,7 +1480,7 @@ async fn start_convert(
 ) -> Result<ConvertTask, String> {
     let s = state.0.clone();
     let ctx = build_ctx(&s, None);
-    let mut req = req;
+    let mut req = converter::normalize_request(&req);
     let src = std::path::PathBuf::from(&req.input_file);
     if !src.is_file() {
         return Err(format!("输入文件不存在：{}", req.input_file));
@@ -1501,10 +1508,21 @@ async fn start_convert(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| src.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| ctx.download_dir()));
     std::fs::create_dir_all(&out_dir).map_err(err)?;
-    let output = converter::output_path_for(&src, &out_dir, &req.format);
+    // Check the actual source/target route before creating a task or output file.
+    let catalog = converter::convert_targets(&ctx, &req.input_file);
+    let supported = catalog["groups"].as_array().into_iter().flatten()
+        .flat_map(|g| g["formats"].as_array().into_iter().flatten())
+        .any(|f| f["id"].as_str() == Some(req.format.as_str()) && f["available"] == true);
+    if !supported {
+        return Err(format!("当前文件无法转换为 {}，请重新检测转换引擎并选择可用的目标格式", req.format.to_uppercase()));
+    }
+    let output = converter::reserve_output_path(&src, &out_dir, &req.format).map_err(err)?;
     let task = converter::new_convert_task(&req, &output, ctx::now_ms());
     let request_json = serde_json::to_string(&req).ok();
-    s.db.upsert_convert(&task, request_json.as_deref()).map_err(err)?;
+    if let Err(e) = s.db.upsert_convert(&task, request_json.as_deref()) {
+        let _ = std::fs::remove_file(&output);
+        return Err(err(e));
+    }
 
     let _ = app.emit("convert://update", &task);
 
@@ -1632,6 +1650,17 @@ pub fn run_convert_job(
             let _ = app.emit("convert://update", &task);
         }
     }
+}
+
+#[tauri::command]
+async fn retry_convert(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<ConvertTask, String> {
+    let task = state.0.db.get_convert(&id).map_err(err)?.ok_or("转换任务不存在")?;
+    if matches!(task.status, TaskStatus::Converting | TaskStatus::Pending) {
+        return Err("任务仍在进行中".into());
+    }
+    let req = state.0.db.get_convert_request(&id).map_err(err)?
+        .ok_or("旧任务没有保存转换参数，请重新选择文件并开始转换")?;
+    start_convert(app, state, req).await
 }
 
 #[tauri::command]
@@ -2095,10 +2124,14 @@ pub fn run() {
             probe_media,
             list_converts,
             start_convert,
+            retry_convert,
             cancel_convert,
             remove_convert,
             list_subtitles,
             start_subtitle,
+            asr_jobs::start_asr,
+            asr_jobs::asr_engine_status,
+            asr_jobs::install_asr_engine,
             cancel_subtitle,
             remove_subtitle,
             list_test_cases,
@@ -2110,6 +2143,7 @@ pub fn run() {
             probe_document,
             enqueue_links,
             convert_formats,
+            convert_targets,
             file_sizes,
             plugin_sandbox_info,
             plugin_list,
@@ -2266,9 +2300,17 @@ async fn enqueue_links(
 /// 转换格式目录：按 视频/音频/图片/文档 分组，带本机引擎真实可用性
 #[tauri::command]
 fn convert_formats(state: State<'_, AppState>) -> serde_json::Value {
+    crate::converter::invalidate_catalog_cache();
     let s = state.0.clone();
     let ctx = build_ctx(&s, None);
     crate::converter::convert_formats(&ctx)
+}
+
+#[tauri::command]
+fn convert_targets(state: State<'_, AppState>, path: String, refresh: Option<bool>) -> serde_json::Value {
+    if refresh.unwrap_or(false) { crate::converter::invalidate_catalog_cache(); }
+    let ctx = build_ctx(&state.0, None);
+    crate::converter::convert_targets(&ctx, &path)
 }
 
 /// 一批文件的真实大小 / 是否存在（转换队列卡片要显示「源大小 → 产物大小」）

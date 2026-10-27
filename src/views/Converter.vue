@@ -11,7 +11,7 @@
  * 历史上并列的「音视频参数区 / 文档转换能力区 / 引擎区」全部并入本流程，不再重复占屏。
  */
 import { useI18n } from 'vue-i18n'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NIcon, NProgress, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
@@ -30,10 +30,10 @@ import {
   BuildOutline,
   SearchOutline,
   CloseOutline,
+  FolderOpenOutline,
 } from '@vicons/ionicons5'
 import ConvertRow from '@/components/ConvertRow.vue'
 import SettingsGroup from '@/components/SettingsGroup.vue'
-import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import {
@@ -72,6 +72,7 @@ import {
   type FlatFormat,
 } from '@/services/formatCatalog'
 import type { ConvertTask, MediaProbe } from '@/types'
+import { classifyInput, commonFormats, preferredTarget, type InputKind } from '@/services/conversion'
 const { t: tr } = useI18n()
 
 const store = useTaskStore()
@@ -85,6 +86,13 @@ const probing = ref(false)
 const dragging = ref(false)
 const autoReason = ref('')
 const autoMode = ref(false)
+const starting = ref(false)
+const sourceError = ref('')
+const moreFormats = ref(false)
+let sourceRequest = 0
+let catalogRequest = 0
+let disposed = false
+let unlistenDrop: (() => void) | undefined
 
 /* ==================== ② 目标格式（唯一一份状态） ==================== */
 const catalog = ref<ConvertFormatCatalog>(FALLBACK_CATALOG)
@@ -127,6 +135,7 @@ const docNative = computed(() =>
 const capsLoaded = computed(() => !!docCaps.value)
 /** 当前选中的文件是不是文档（决定走文档参数还是音视频 / 图片参数） */
 const isDocFile = computed(() => !!inputFile.value && isDocPath(inputFile.value, docCaps.value?.native))
+const inputKind = computed(() => classifyInput(inputFile.value, probe.value))
 
 /* ==================== 格式目录（只呈现本机真能写出的格式） ==================== */
 /**
@@ -157,12 +166,13 @@ const typeOptions = computed(() => [
     .filter((g) => g.formats.length > 0)
     .map((g) => ({ value: g.id, label: groupLabel(g), count: g.formats.length })),
 ])
+const displayTypeOptions = computed(() => moreFormats.value || !inputFile.value ? typeOptions.value : typeOptions.value.filter(o => o.value !== 'all'))
 
 /** 类型 + 搜索（格式名 / 说明）双重过滤后的可见格式 */
 const visibleFormats = computed<FlatFormat[]>(() => {
   const type = typeFilter.value
   const q = search.value.trim().toLowerCase()
-  return allFormatItems.value.filter((f) => {
+  const matches = allFormatItems.value.filter((f) => {
     if (type !== 'all' && f.group !== type) return false
     if (!q) return true
     return (
@@ -171,6 +181,9 @@ const visibleFormats = computed<FlatFormat[]>(() => {
       String(f.note || '').toLowerCase().includes(q)
     )
   })
+  if (!inputFile.value || moreFormats.value || q) return matches
+  const kind = (type === 'all' ? inputKind.value : type) as InputKind
+  return commonFormats(matches.filter(f => f.group === kind), kind, format.value)
 })
 const filterLabel = computed(() => (typeFilter.value === 'all' ? tr('全部') : groupLabelById(typeFilter.value)))
 
@@ -201,11 +214,18 @@ const paramKind = computed<'video' | 'audio' | 'image' | 'document'>(() => {
 
 /** 引擎状态（ffmpeg / pandoc / poppler）：目录表为主，文档能力表能证明就绪时也算就绪 */
 function engineOk(name: string) {
+  if (inTauri && !catalogLive.value) return false
   if (name === 'pandoc') return !!(docCaps.value?.pandoc || catalog.value.engines.pandoc)
   if (name === 'poppler') return !!(docCaps.value?.poppler || catalog.value.engines.poppler)
   return catalog.value.engines[name] !== false
 }
-const engineRows = computed(() => ENGINE_ORDER.map((name) => ({ name, ok: engineOk(name) })))
+const engineRows = computed(() => {
+  const missing = isDocFile.value
+    ? /\.pdf$/i.test(inputFile.value) ? ['poppler'] : ['pandoc']
+    : /\.(psd|heic|heif)$/i.test(inputFile.value) ? ['imagemagick'] : ['ffmpeg']
+  const names = !inputFile.value ? [...ENGINE_ORDER] : selectedItem.value?.engines.filter(e => e !== 'native') ?? missing
+  return [...new Set(names)].map((name) => ({ name, ok: engineOk(name) }))
+})
 const enginesReady = computed(() => engineRows.value.every((e) => e.ok))
 
 /** 悬停提示：说明 / 依赖引擎（网格里只会出现本机可用的格式，不再解释「不支持」） */
@@ -242,11 +262,34 @@ function selectFormat(f: FlatFormat) {
   format.value = f.id
   if (f.group === 'audio') {
     extractAudio.value = true
+    syncCodecs()
   } else if (f.group === 'video' || f.group === 'image') {
     extractAudio.value = false
     if (f.group === 'video') syncCodecs()
   }
   if (typeFilter.value !== 'all') typeFilter.value = f.group
+}
+
+function chooseType(kind: string) {
+  typeFilter.value = kind
+  if (kind === 'all' || selectedItem.value?.group === kind) return
+  const items = allFormatItems.value.filter(f => f.group === kind)
+  const id = preferredTarget(items.map(f => f.id), kind as InputKind, inputFile.value)
+  const target = items.find(f => f.id === id)
+  if (target) selectFormat(target)
+}
+
+function clearSource() {
+  sourceRequest++
+  catalogRequest++
+  inputFile.value = ''
+  probe.value = null
+  docProbe.value = null
+  sourceError.value = ''
+  autoReason.value = ''
+  probing.value = false
+  docProbeBusy.value = false
+  catalogLoading.value = false
 }
 
 /** 「仅提取音频」开关：目标格式与类型选项跟着在音频 / 视频之间切换 */
@@ -280,17 +323,25 @@ const speedOptions = computed(() => SPEEDS.map((s) => ({ label: s === 1 ? tr('�
 /* ==================== 探测与目录刷新 ==================== */
 
 /** 文档探测：页数 / 工作表 / 幻灯片 / 字符数 */
-async function loadDocProbe(path: string) {
+async function loadDocProbe(path: string, request = sourceRequest) {
   docProbe.value = null
   if (!isTauri()) return // 浏览器预览：只显示文件名，不做探测
   docProbeBusy.value = true
   try {
-    docProbe.value = await probeDocument(path)
-    if (!docProbe.value.ok && docProbe.value.error) message.warning(docProbe.value.error)
+    const result = await probeDocument(path)
+    if (disposed || request !== sourceRequest) return
+    docProbe.value = result
+    if (!result.ok && result.error) {
+      sourceError.value = result.error
+      message.warning(result.error)
+    }
   } catch (e: any) {
-    message.error(String(e?.message ?? e))
+    if (request === sourceRequest && !disposed) {
+      sourceError.value = String(e?.message ?? e)
+      message.error(sourceError.value)
+    }
   } finally {
-    docProbeBusy.value = false
+    if (request === sourceRequest && !disposed) docProbeBusy.value = false
   }
 }
 
@@ -300,14 +351,15 @@ async function refreshDocCaps(silent = false) {
   try {
     const c = await docCapabilities()
     docCaps.value = c
-    if (isDocFile.value) await loadDocProbe(inputFile.value)
   } catch (e: any) {
     if (!silent) message.error(String(e?.message ?? e))
   }
 }
 
 /** 格式目录（Tauri 走后端 convert_formats，取不到 / 浏览器预览用内置兜底目录） */
-async function refreshFormats(silent = true) {
+async function refreshFormats(silent = true, force = false) {
+  const request = ++catalogRequest
+  const path = inputFile.value
   if (!inTauri) {
     catalog.value = FALLBACK_CATALOG
     catalogLive.value = false
@@ -317,15 +369,19 @@ async function refreshFormats(silent = true) {
   }
   catalogLoading.value = true
   try {
-    const r = await loadFormatCatalog()
+    const r = await loadFormatCatalog(path || undefined, force)
+    if (disposed || request !== catalogRequest || path !== inputFile.value) return
     catalog.value = r.catalog
     catalogLive.value = r.live
     ensureFormatUsable()
-    if (!r.live && !silent) message.warning(tr('未取到后端格式目录，已退回内置格式表'))
+    if (!r.live && !silent) message.warning(tr('格式检测失败，请重新检测'))
   } catch (e: any) {
+    if (request !== catalogRequest || disposed) return
+    catalogLive.value = false
+    catalog.value = { total: 0, groups: [], engines: {} }
     if (!silent) message.error(String(e?.message ?? e))
   } finally {
-    catalogLoading.value = false
+    if (request === catalogRequest && !disposed) catalogLoading.value = false
   }
 }
 
@@ -335,7 +391,7 @@ async function refreshAll(silent = true) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
-  await Promise.all([refreshFormats(silent), refreshDocCaps(silent)])
+  await Promise.all([refreshFormats(silent, true), refreshDocCaps(silent)])
   if (!silent) message.success(tr('已重新检测转换引擎与格式目录'))
 }
 
@@ -351,7 +407,7 @@ async function installEngine(name: string) {
     await ipc.installTool(name)
     message.success(tr('{name} 安装完成', { name }))
     void store.refreshTools().catch(() => {})
-    await refreshFormats(true)
+    await refreshFormats(true, true)
     if (name === 'pandoc' || name === 'poppler') await refreshDocCaps(true)
   } catch (e: any) {
     message.error(String(e?.message ?? e))
@@ -364,7 +420,7 @@ async function installEngine(name: string) {
 
 async function pick() {
   try {
-    const docExts = docNative.value.map(normalizeExt).filter(Boolean)
+    const docExts = [...new Set([...FALLBACK_DOC_EXTS, ...docNative.value].map(normalizeExt).filter(Boolean))]
     const picked = await openDialog({
       multiple: false,
       directory: false,
@@ -388,40 +444,52 @@ async function pick() {
 }
 
 async function load(path: string) {
+  const request = ++sourceRequest
   inputFile.value = path
   probing.value = true
   probe.value = null
   docProbe.value = null
   autoReason.value = ''
+  autoMode.value = false
+  sourceError.value = ''
+  moreFormats.value = false
+  search.value = ''
+  typeFilter.value = 'all'
+  docProbeBusy.value = false
+  mute.value = false
   // 文档文件（PDF / Office / 电子书）：走 probe_document，ffprobe 读不了这些格式
   if (isDocPath(path, docCaps.value?.native)) {
+    await Promise.all([refreshFormats(), loadDocProbe(path, request)])
+    if (request !== sourceRequest || disposed) return
+    extractAudio.value = false
+    format.value = preferredTarget(allFormatItems.value.map(f => f.id), 'document', path)
     probing.value = false
-    typeFilter.value = 'document'
-    // 网格里只有可用格式：不是文档目标就落到文档类第一个可用格式
-    const docItems = usableCatalog.value.groups.find((g) => g.id === 'document')?.formats ?? []
-    const current = docItems.find((f) => f.id === format.value)
-    if (!current && docItems[0]) format.value = docItems[0].id
-    await loadDocProbe(path)
     return
   }
   try {
-    const p = await ffmpeg.probe(path)
+    const [p] = await Promise.all([ffmpeg.probe(path), refreshFormats()])
+    if (request !== sourceRequest || disposed) return
     probe.value = p
-    const kind = p.video_codec && p.video_codec !== 'none' ? 'video' : 'audio'
-    if (kind === 'audio') {
-      extractAudio.value = true
-      format.value = 'mp3'
-    } else {
-      extractAudio.value = false
-      format.value = 'mp4'
-    }
+    const kind = classifyInput(path, p)
+    extractAudio.value = kind === 'audio'
+    format.value = preferredTarget(allFormatItems.value.filter(f => f.group === kind).map(f => f.id), kind, path)
     syncCodecs()
     // 载入后立刻给出自动检测建议
-    applyAuto(false)
+    if (kind !== 'image' && settingsStore.settings.auto_detect_format !== false) applyAuto(false)
   } catch (e: any) {
-    message.error(String(e?.message ?? e))
+    if (request !== sourceRequest || disposed) return
+    if (classifyInput(path) === 'image') {
+      // ImageMagick can read some images which ffprobe cannot inspect.
+      await refreshFormats()
+      if (request !== sourceRequest || disposed) return
+      extractAudio.value = false
+      format.value = preferredTarget(allFormatItems.value.map(f => f.id), 'image', path)
+    } else {
+      sourceError.value = String(e?.message ?? e)
+      message.error(sourceError.value)
+    }
   } finally {
-    probing.value = false
+    if (request === sourceRequest && !disposed) probing.value = false
   }
 }
 
@@ -429,16 +497,20 @@ async function load(path: string) {
 function applyAuto(notify = true) {
   const t = autoDetectTarget(probe.value)
   autoReason.value = t.reason
-  if (!probe.value) return
+  if (!probe.value || inputKind.value === 'image' || !allFormatItems.value.some(f => f.id === t.format)) return
   autoMode.value = true
   extractAudio.value = t.extractAudio
   format.value = t.format
   if (!t.extractAudio) {
     videoCodec.value = t.video
-    resolution.value = '原分辨率'
+    if (notify) resolution.value = '原分辨率'
   }
   audioCodec.value = t.audio
-  if (t.remux) crf.value = 18
+  const processing = resolution.value !== '原分辨率' || fps.value > 0 || speed.value !== 1 || sampleRate.value > 0 || channels.value > 0
+  if (processing) {
+    syncCodecs()
+    autoReason.value = tr('已按输出设置选择编码参数')
+  } else if (t.remux) crf.value = 18
   if (notify) message.success(t.reason)
 }
 
@@ -447,6 +519,12 @@ function syncCodecs() {
   const s = suggestCodecs(format.value, extractAudio.value)
   if (!extractAudio.value) videoCodec.value = s.video
   audioCodec.value = s.audio
+}
+
+function onQualityChange() {
+  autoMode.value = false
+  autoReason.value = ''
+  if (videoCodec.value === 'copy') videoCodec.value = suggestCodecs(format.value, false).video
 }
 
 /* ==================== 开始转换 ==================== */
@@ -483,10 +561,17 @@ async function startPlain(successKey: string) {
 }
 
 async function start() {
+  if (starting.value) return
   if (!inputFile.value) {
     message.warning(tr('请先选择文件'))
     return
   }
+  if (probing.value || docProbeBusy.value || catalogLoading.value || sourceError.value || !selectedItem.value || (inTauri && !catalogLive.value)) {
+    message.warning(tr('请先完成文件与格式检测'))
+    return
+  }
+  starting.value = true
+  try {
   if (paramKind.value === 'document') {
     await startPlain('已开始转换（文档）')
     return
@@ -515,10 +600,23 @@ async function start() {
       hwaccel: hwaccel.value,
       faststart: faststart.value,
       removeMetadata: removeMetadata.value,
-      autoFormat: autoMode.value,
+      // The displayed recommendation is already resolved. Preserve all explicit choices.
+      autoFormat: false,
     })
     store.enqueueConvert(t)
     message.success(autoMode.value ? tr('已开始转换（自动检测模式）') : tr('已开始转换'))
+  } catch (e: any) {
+    message.error(String(e?.message ?? e))
+  }
+  } finally {
+    starting.value = false
+  }
+}
+
+async function chooseOutputDir() {
+  try {
+    const selected = await openDialog({ directory: true, multiple: false, defaultPath: outputDir.value || undefined })
+    if (typeof selected === 'string') outputDir.value = selected
   } catch (e: any) {
     message.error(String(e?.message ?? e))
   }
@@ -531,9 +629,8 @@ async function resume(id: string) {
   const t = store.converts.find((x) => x.id === id)
   if (!t) return
   try {
-    // 沿用当前参数面板：源文件不是同一条时先重新载入
-    if (inputFile.value !== t.input_file) await load(t.input_file)
-    await start()
+    const task = await invoke<ConvertTask>('retry_convert', { id })
+    store.enqueueConvert(task)
   } catch (e: any) {
     message.error(String(e?.message ?? e))
   }
@@ -645,13 +742,16 @@ watch(
 onMounted(async () => {
   if (!store.ready) await store.bootstrap()
   if (!settingsStore.loaded) await settingsStore.load()
+  if (disposed) return
   crf.value = settingsStore.settings.default_crf || 23
+  resolution.value = settingsStore.settings.default_resolution || '原分辨率'
+  hwaccel.value = !!settingsStore.settings.hwaccel
   // 文档能力表 + 目标格式目录：静默探测（浏览器预览下用内置兜底目录渲染）
   void refreshDocCaps(true)
   void refreshFormats(true)
   try {
     const wv = getCurrentWebview()
-    await wv.onDragDropEvent((ev) => {
+    const cleanup = await wv.onDragDropEvent((ev) => {
       const p = ev.payload as any
       if (p?.type === 'over') dragging.value = true
       else if (p?.type === 'drop') {
@@ -660,14 +760,23 @@ onMounted(async () => {
         if (paths.length) void load(paths[0])
       } else if (p?.type === 'leave') dragging.value = false
     })
+    if (disposed) cleanup()
+    else unlistenDrop = cleanup
   } catch {
     /* 浏览器环境无拖拽事件 */
   }
 })
+
+onUnmounted(() => {
+  disposed = true
+  sourceRequest++
+  catalogRequest++
+  unlistenDrop?.()
+})
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl space-y-5">
+  <div class="umi-page conversion-page">
     <!-- ==================== 统一转换流程：文件 → 目标格式 → 参数 → 开始 ==================== -->
     <section class="umi-card p-5 transition-all" :class="dragging ? 'drop-active' : ''" data-role="convert-flow">
       <!-- ========== ① 源文件 ========== -->
@@ -680,17 +789,20 @@ onMounted(async () => {
           <span class="flex items-center gap-2.5">
             <span class="s-text-3 text-[11px]">{{ $t('支持拖拽文件到窗口') }}</span>
             <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
-            <ModeSwitch />
           </span>
         </div>
 
-        <div class="flex gap-2">
-          <input v-model="inputFile" class="umi-input flex-1" :placeholder="$t('选择文件或直接拖拽到窗口内…')" readonly data-role="source-input" />
-          <button class="umi-btn-primary whitespace-nowrap" @click="pick">
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <input :value="inputFile ? basename(inputFile) : ''" :title="inputFile" class="umi-input min-w-0 flex-1" :placeholder="$t('选择文件或直接拖拽到窗口内…')" readonly data-role="source-input" />
+          <button class="umi-btn-primary whitespace-nowrap" data-role="choose-source" @click="pick">
             <span class="flex items-center gap-1.5">
               <NIcon :size="14" :component="DocumentOutline" />{{ $t('选择文件') }}</span>
           </button>
+          <button v-if="inputFile" class="umi-btn umi-btn-sm shrink-0" :title="$t('清除')" data-role="clear-source" @click="clearSource"><NIcon :size="16" :component="CloseOutline" /></button>
         </div>
+        <p v-if="!inputFile" class="umi-hint mt-3">{{ $t('选好文件后，只显示可转换的格式') }}</p>
+        <p v-if="probing" class="umi-hint mt-2" role="status">{{ $t('探测中…') }}</p>
+        <p v-if="sourceError" class="mt-2 text-xs text-red-500" role="alert">{{ sourceError }}</p>
 
         <!-- 音视频探测结果 + 自动检测 -->
         <div v-if="probe" class="s-border-soft s-sunken mt-2.5 rounded-xl border px-3 py-2.5" data-role="media-info">
@@ -730,14 +842,14 @@ onMounted(async () => {
       </div>
 
       <!-- ========== ② 目标格式（唯一的格式选择器） ========== -->
-      <div class="s-border-soft mt-4 border-t pt-4" data-step="format" data-role="format-selector">
+      <div v-show="inputFile" class="s-border-soft mt-4 border-t pt-4" data-step="format" data-role="format-selector">
         <div class="mb-2.5 flex flex-wrap items-center justify-between gap-2">
           <span class="s-text-2 flex flex-wrap items-center gap-2 text-[12px] font-medium">
             <span class="flex h-4 w-4 items-center justify-center rounded-full bg-umi-500/20 text-[10px] text-accent">2</span>
             <NIcon :size="15" :component="GridOutline" class="text-accent" />{{ $t('目标格式') }}
-            <span class="umi-chip !text-[10px]" data-role="format-total">{{ $t('共 {n} 种格式', { n: totalCount }) }}</span>
-            <span class="umi-chip !text-[10px]" data-role="format-available">{{ $t('可用 {n} 种', { n: availableCount }) }}</span>
-            <span class="s-text-3 text-[10.5px]" data-role="filter-summary">
+            <span v-show="moreFormats" class="umi-chip !text-[10px]" data-role="format-total">{{ $t('共 {n} 种格式', { n: totalCount }) }}</span>
+            <span v-show="moreFormats" class="umi-chip !text-[10px]" data-role="format-available">{{ $t('可用 {n} 种', { n: availableCount }) }}</span>
+            <span v-show="moreFormats" class="s-text-3 text-[10.5px]" data-role="filter-summary">
               {{ $t('当前筛选：{name}（{n}）', { name: filterLabel, n: visibleFormats.length }) }}</span>
           </span>
           <div class="flex items-center gap-2">
@@ -745,9 +857,9 @@ onMounted(async () => {
               {{ $t('浏览器预览：显示内置格式表') }}
             </span>
             <span v-else-if="!catalogLive && !catalogLoading" class="s-text-3 text-[10.5px]" data-role="fallback-hint">
-              {{ $t('未取到后端格式目录，已退回内置格式表') }}
+              {{ $t('格式检测失败，请重新检测') }}
             </span>
-            <button class="umi-btn !py-1.5 !text-[11px]" :disabled="catalogLoading" @click="refreshAll(false)">
+            <button v-if="moreFormats || !catalogLive" class="umi-btn umi-btn-sm" :disabled="catalogLoading" @click="refreshAll(false)">
               <span class="flex items-center gap-1">
                 <NIcon :size="12" :component="RefreshOutline" />{{ $t('重新检测') }}</span>
             </button>
@@ -755,7 +867,7 @@ onMounted(async () => {
         </div>
 
         <!-- 引擎状态条（一行：ffmpeg / pandoc / poppler，未就绪才出现安装按钮） -->
-        <div class="s-border-soft s-surface-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border px-3 py-2" data-role="engine-strip">
+        <div v-if="moreFormats || !enginesReady" class="s-border-soft s-surface-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border px-3 py-2" data-role="engine-strip">
           <span class="s-text-2 flex items-center gap-1.5 text-[11.5px] font-medium">
             <NIcon :size="13" :component="BuildOutline" class="text-accent" />{{ $t('转换引擎') }}</span>
           <span
@@ -805,20 +917,20 @@ onMounted(async () => {
 
         <!-- 类型芯片 + 搜索（同一份选择器，不再有第二处类型选择） -->
         <div class="mt-2.5 flex flex-wrap items-center gap-2.5">
-          <div class="s-border-soft s-surface-2 flex flex-wrap gap-1 rounded-xl border p-1" data-role="type-options">
+          <div v-show="moreFormats || displayTypeOptions.length > 1" class="s-border-soft s-surface-2 flex flex-wrap gap-1 rounded-xl border p-1" data-role="type-options">
             <button
-              v-for="o in typeOptions"
+              v-for="o in displayTypeOptions"
               :key="`fmt-type-${o.value}`"
               class="rounded-lg px-3 py-1.5 text-[11.5px] transition-all"
               :data-type="o.value"
               :data-type-active="typeFilter === o.value ? '1' : '0'"
               :class="typeFilter === o.value ? 'bg-umi-500/20 font-medium text-accent' : 's-text-2 hover:bg-umi-500/10'"
-              @click="typeFilter = o.value"
+              @click="chooseType(o.value)"
             >
-              {{ o.label }}<span class="s-text-3 ml-1 text-[10px]">{{ o.count }}</span>
+              {{ o.label }}<span v-show="moreFormats" class="s-text-3 ml-1 text-[10px]">{{ o.count }}</span>
             </button>
           </div>
-          <div class="s-border-soft s-surface-2 flex min-w-[190px] flex-1 items-center gap-1.5 rounded-xl border px-2.5 py-1.5">
+          <div v-show="moreFormats || !inputFile" class="s-border-soft s-surface-2 flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border px-2.5 py-1.5">
             <NIcon :size="13" :component="SearchOutline" class="s-text-3 shrink-0" />
             <input
               v-model="search"
@@ -836,6 +948,9 @@ onMounted(async () => {
               <NIcon :size="13" :component="CloseOutline" />
             </button>
           </div>
+          <button v-if="inputFile" class="umi-btn umi-btn-sm" data-role="format-scope" :aria-pressed="moreFormats" @click="moreFormats = !moreFormats; typeFilter = 'all'; search = ''">
+            {{ moreFormats ? $t('常用格式') : $t('更多格式') }}
+          </button>
         </div>
 
         <!-- 目标格式网格：格式名 + 引擎徽标 + note（唯一个网格；只列本机可用的格式） -->
@@ -851,6 +966,7 @@ onMounted(async () => {
             :data-format-group="f.group"
             :data-available="f.available ? '1' : '0'"
             :data-selected="isSelected(f) ? '1' : '0'"
+            :aria-pressed="isSelected(f)"
             :title="formatTip(f)"
             :class="
               isSelected(f) ? 'border-umi-400/60 bg-umi-500/15' : 's-border-soft s-surface-2 hover:border-umi-400/30'
@@ -858,10 +974,10 @@ onMounted(async () => {
             @click="selectFormat(f)"
           >
             <div class="flex items-center justify-between gap-1.5">
-              <span class="s-text truncate text-[11.5px] font-medium">{{ f.label }}</span>
+              <span class="s-text truncate text-[13px] font-medium">{{ f.label }}</span>
               <span v-if="isSelected(f)" class="umi-chip !px-1.5 !text-[9px] text-accent">{{ $t('已选') }}</span>
             </div>
-            <div class="mt-0.5 flex flex-wrap items-center gap-1">
+            <div v-if="moreFormats" class="mt-0.5 flex flex-wrap items-center gap-1">
               <span v-if="!f.engines.length" class="umi-chip !px-1.5 !text-[9px]">{{ $t('原生') }}</span>
               <span
                 v-for="e in f.engines"
@@ -870,30 +986,40 @@ onMounted(async () => {
                 :class="engineOk(e) ? '' : 'text-amber-600 dark:text-amber-400'"
               >{{ e }}</span>
             </div>
-            <div v-if="f.note" class="s-text-3 mt-0.5 truncate text-[9.5px]" :title="f.note">{{ f.note }}</div>
+            <div v-if="moreFormats && f.note" class="s-text-3 mt-0.5 truncate text-[11px]" :title="f.note">{{ f.note }}</div>
           </button>
         </div>
         <div v-if="!visibleFormats.length" class="s-text-3 py-6 text-center text-[11.5px]" data-role="grid-empty">
           {{ $t('没有匹配的格式（换个类型或清空搜索）') }}</div>
 
         <div class="s-text-3 mt-2 text-[10.5px] leading-relaxed">
-          {{ $t('选中即作为转换任务的目标格式；视频 / 音频目标才显示下方编码参数。') }}
+          {{ $t('目标格式会根据当前文件和已安装工具自动筛选。') }}
         </div>
       </div>
 
       <!-- ========== ③ 转换参数（按目标格式所属类型自动显隐） ========== -->
-      <div class="s-border-soft mt-4 border-t pt-4" data-step="params" data-role="param-area" :data-param-kind="paramKind">
-        <div class="mb-2.5 flex flex-wrap items-center gap-2">
+      <div v-show="inputFile" class="mt-4" data-step="params" data-role="param-area" :data-param-kind="paramKind">
+        <div class="sr-only" aria-live="polite">
           <span class="s-text-2 flex items-center gap-2 text-[12px] font-medium">
             <span class="flex h-4 w-4 items-center justify-center rounded-full bg-umi-500/20 text-[10px] text-accent">3</span>
-            <NIcon :size="14" :component="OptionsOutline" class="text-accent" />{{ $t('转换参数') }}
+            <NIcon :size="14" :component="OptionsOutline" class="text-accent" />{{ $t('输出设置') }}
           </span>
           <span class="umi-chip !text-[10px]" data-role="current-target">{{ currentTargetLabel }}</span>
           <span class="s-text-3 text-[10px]" data-role="current-target-group">{{ currentTargetGroup }}</span>
         </div>
 
+        <div class="mb-3" data-field="output-dir">
+          <label class="umi-label">{{ $t('输出目录') }}</label>
+          <div class="flex gap-2">
+            <input v-model="outputDir" class="umi-input min-w-0 flex-1" :placeholder="$t('默认与源文件同目录')" :aria-label="$t('输出目录')" />
+            <button class="umi-btn umi-btn-sm shrink-0" :title="$t('选择目录')" @click="chooseOutputDir">
+              <NIcon :size="15" :component="FolderOpenOutline" /><span class="ml-1">{{ $t('选择目录') }}</span>
+            </button>
+          </div>
+        </div>
+
         <!-- 高级选项（1.10）：编码参数 / 码率 / 帧率等每任务参数默认折叠；简单模式下整体不渲染 -->
-        <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline">
+        <SettingsGroup v-if="paramKind === 'video' || paramKind === 'audio'" :title="$t('高级选项')" :icon="OptionsOutline" always>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div v-if="paramKind === 'video'" data-field="video-codec">
             <label class="umi-label">{{ $t('视频编码') }}</label>
@@ -913,7 +1039,7 @@ onMounted(async () => {
           </div>
           <div v-if="paramKind === 'video'" data-field="quality">
             <label class="umi-label">{{ $t('质量预设') }}</label>
-            <NSelect v-model:value="crf" :options="qualityOptions" size="small" />
+            <NSelect v-model:value="crf" :options="qualityOptions" size="small" @update:value="onQualityChange" />
           </div>
           <div v-if="paramKind === 'audio'" data-field="audio-codec">
             <label class="umi-label">{{ $t('音频编码') }}</label>
@@ -948,10 +1074,6 @@ onMounted(async () => {
               size="small"
             />
           </div>
-          <div data-field="output-dir">
-            <label class="umi-label">{{ $t('输出目录') }}</label>
-            <input v-model="outputDir" class="umi-input !py-1.5 text-[12px]" :placeholder="$t('默认与源文件同目录')" />
-          </div>
         </div>
 
         <!-- 原「高级选项（更多选择）」的内容并入同一折叠区组（仅视频 / 音频目标） -->
@@ -975,6 +1097,8 @@ onMounted(async () => {
             </div>
           </div>
           <div class="mt-3 flex flex-wrap items-center gap-5">
+            <label v-if="paramKind === 'video'" class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
+              <NSwitch v-model:value="mute" size="small" />{{ $t('去除音轨') }}</label>
             <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
               <NSwitch v-model:value="hwaccel" size="small" />{{ $t('硬件加速解码') }}</label>
             <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
@@ -993,9 +1117,9 @@ onMounted(async () => {
         <!-- 文档目标：文档专属说明 + 后端原生输入扩展名 -->
         <div v-else-if="paramKind === 'document'" class="mt-2.5 space-y-2" data-field="doc-note">
           <div class="s-text-3 text-[10.5px] leading-relaxed">
-            {{ $t('文档格式在上方网格选择；转换按扩展名自动路由到文档引擎，不再走 ffmpeg。') }}
+            {{ $t('目标格式会根据当前文件和已安装工具自动筛选。') }}
           </div>
-          <div class="flex flex-wrap items-center gap-1.5">
+          <div v-if="!settingsStore.isSimple" class="flex flex-wrap items-center gap-1.5">
             <span class="s-text-3 text-[10.5px]">{{ $t('支持格式（输入）') }}</span>
             <span v-for="e in docNative" :key="`doc-ext-${e}`" class="umi-chip !px-1.5 !text-[9.5px]">
               {{ normalizeExt(e).toUpperCase() }}</span>
@@ -1006,22 +1130,10 @@ onMounted(async () => {
 
         <!-- 原「高级选项（更多选择）」的折叠卡已并入上方同一区组（1.10） -->
 
-        <div class="mt-3.5 flex items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-5">
-            <label
-              v-if="paramKind === 'video' || paramKind === 'audio'"
-              class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]"
-            >
-              <NSwitch :value="extractAudio" size="small" @update:value="onExtractAudio" />{{ $t('仅提取音频') }}</label>
-            <label
-              v-if="paramKind === 'video'"
-              class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]"
-            >
-              <NSwitch v-model:value="mute" size="small" :disabled="extractAudio" />{{ $t('去除音轨') }}</label>
-          </div>
-          <button class="umi-btn-primary shrink-0" :disabled="!inputFile || probing" data-role="start-convert" @click="start">
+        <div class="mt-4 flex justify-end gap-3">
+          <button class="umi-btn-primary shrink-0" :disabled="!inputFile || probing || docProbeBusy || catalogLoading || starting || !!sourceError || !selectedItem || (inTauri && !catalogLive)" data-role="start-convert" @click="start">
             <span class="flex items-center gap-1.5">
-              <NIcon :size="14" :component="SwapHorizontalOutline" />{{ $t('开始转换') }}</span>
+              <NIcon :size="14" :component="SwapHorizontalOutline" />{{ starting ? $t('提交中…') : $t('开始转换') }}</span>
           </button>
         </div>
       </div>
@@ -1055,7 +1167,7 @@ onMounted(async () => {
           @resume="resume(t.id)"
         />
       </div>
-      <div v-else class="umi-card s-text-3 flex flex-col items-center gap-2 py-12">
+      <div v-else class="s-text-3 flex items-center justify-center gap-2 py-6">
         <NIcon :size="26" :component="SwapHorizontalOutline" />
         <div class="text-[12px]">{{ $t('还没有转换任务') }}</div>
       </div>

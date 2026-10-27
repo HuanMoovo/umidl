@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NIcon, NProgress, NSelect, NSwitch, useMessage } from 'naive-ui'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
@@ -15,14 +15,14 @@ import {
 } from '@vicons/ionicons5'
 import ConvertRow from '@/components/ConvertRow.vue'
 import SettingsGroup from '@/components/SettingsGroup.vue'
-import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import { whisper, languages, OUTPUT_FORMATS, models, modelProgressText } from '@/services/whisper'
+import { asr, CLOUD_PROVIDERS, cloudAllowedLanguages, cloudConfigValid, cloudSupportsTranslation, parseCloudTaskModel, type AsrEngineStatus, type CloudProvider, type LocalAsrEngine } from '@/services/asr'
 import * as ipc from '@/services/ipc'
 import { localizeBackendError } from '@/services/backendError'
 import { basename, formatBytes } from '@/services/utils'
-import { rowProductPath } from '@/services/subtitleProducts'
+import { dirname, rowProductPath } from '@/services/subtitleProducts'
 import type { SubtitleTask, WhisperModelInfo } from '@/types'
 const { t: tr } = useI18n()
 
@@ -36,9 +36,68 @@ const langs = ref<string[]>(['auto'])
 /** 「翻译成英文」：开启后每个语言再补一个 translate_to=en 的任务 */
 const translateEn = ref(false)
 const model = ref('base')
+const engine = ref<'whisper' | 'chinese' | 'cloud'>('whisper')
+const chineseModel = ref<LocalAsrEngine>('sensevoice')
+const cloudProvider = ref<CloudProvider>('groq')
+const cloudPreset = computed(() => CLOUD_PROVIDERS[cloudProvider.value])
+const cloudBaseUrl = ref(CLOUD_PROVIDERS.groq.baseUrl)
+const cloudModel = ref(CLOUD_PROVIDERS.groq.model)
+// Session-only: credentials never enter settings, localStorage, or queue records.
+const cloudApiKey = ref('')
+const cloudAppId = ref('')
+const cloudSecretId = ref('')
+const cloudSecretKey = ref('')
+// A queue retry may represent just the extra translation, not a new batch.
+const translationRetry = ref(false)
+function clearCloudSecrets() {
+  cloudApiKey.value = ''
+  cloudAppId.value = ''
+  cloudSecretId.value = ''
+  cloudSecretKey.value = ''
+}
+const cloudConfig = computed(() => ({
+  provider: cloudProvider.value, base_url: cloudBaseUrl.value.trim(), model: cloudModel.value.trim(),
+  api_key: cloudApiKey.value.trim(), app_id: cloudAppId.value.trim(), secret_id: cloudSecretId.value.trim(), secret_key: cloudSecretKey.value.trim(),
+}))
+const cloudProviderOptions = computed(() => (Object.entries(CLOUD_PROVIDERS) as [CloudProvider, typeof CLOUD_PROVIDERS[CloudProvider]][]).map(([value, preset]) => ({
+  label: ['compatible', 'tencent', 'baidu', 'xunfei'].includes(value) ? tr(preset.label) : preset.label, value,
+})))
+watch(cloudProvider, (provider) => {
+  clearCloudSecrets()
+  cloudBaseUrl.value = CLOUD_PROVIDERS[provider].baseUrl
+  cloudModel.value = CLOUD_PROVIDERS[provider].model
+}, { flush: 'sync' })
+const supportsTranslation = computed(() => engine.value === 'whisper'
+  || (engine.value === 'cloud' && cloudSupportsTranslation(cloudModel.value, cloudProvider.value)))
+const engineOptions = computed(() => [
+  { label: 'Whisper', value: 'whisper' },
+  { label: tr('中文识别'), value: 'chinese' },
+  { label: tr('云端'), value: 'cloud' },
+])
+const chineseModelOptions = [
+  { label: 'SenseVoice', value: 'sensevoice' },
+  { label: 'Paraformer', value: 'paraformer' },
+]
 const outputFormat = ref('srt')
 const dragging = ref(false)
 const starting = ref(false)
+const outputDir = ref('')
+const choosingDir = ref(false)
+const subtitleDir = computed(() => {
+  const sourceDir = dirname(videoPath.value)
+  return outputDir.value || (/^[A-Za-z]:$/.test(sourceDir) ? `${sourceDir}\\` : sourceDir)
+})
+let disposed = false
+let stopDrag: (() => void) | undefined
+let modelLoadVersion = 0
+let fileMetaVersion = 0
+onUnmounted(() => {
+  disposed = true
+  modelLoadVersion++
+  fileMetaVersion++
+  clearCloudSecrets()
+  stopDrag?.()
+})
 /** 本次会话里由前端发起的「翻译成英文」任务（后端 SubtitleTask 不回传 translate_to） */
 const translated = ref<Record<string, boolean>>({})
 
@@ -72,14 +131,75 @@ const modelOptions = computed<{ label: string; value: string }[]>(() => {
   }
   return list
 })
-const langOptions = computed(() => languages().map((l) => ({ label: l.label, value: l.value as string })))
+const langOptions = computed(() => {
+  const list: { label: string; value: string }[] = languages().map((l) => ({ label: l.label, value: l.value }))
+  if (engine.value === 'chinese') {
+    if (chineseModel.value === 'paraformer') return list.filter((l) => ['auto', 'zh'].includes(l.value))
+    return [...list.filter((l) => ['auto', 'zh', 'en', 'ja', 'ko'].includes(l.value)), { label: tr('粤语'), value: 'yue' }]
+  }
+  if (engine.value === 'cloud') {
+    const supported = cloudAllowedLanguages(cloudProvider.value, cloudModel.value)
+    if (supported) return [...list, { label: tr('粤语'), value: 'yue' }].filter((l) => supported.includes(l.value))
+  }
+  return list
+})
 const fmtOptions = OUTPUT_FORMATS.map((f) => ({ label: f.toUpperCase(), value: f as string }))
 
-const modelReady = computed(() => {
-  const t = store.tools.find((x) => x.name === 'whisper-model')
-  return !!t?.found
-})
 const whisperFound = computed(() => !!store.tools.find((x) => x.name === 'whisper')?.found)
+const ffmpegFound = computed(() => !!store.tools.find((x) => x.name === 'ffmpeg')?.found)
+const asrStatuses = ref<Partial<Record<LocalAsrEngine, AsrEngineStatus>>>({})
+const asrErrors = ref<Partial<Record<LocalAsrEngine, string>>>({})
+const asrLoading = ref<Partial<Record<LocalAsrEngine, boolean>>>({})
+const asrVersions: Record<LocalAsrEngine, number> = { sensevoice: 0, paraformer: 0 }
+const installingAsr = ref<LocalAsrEngine | null>(null)
+const selectedAsrStatus = computed(() => asrStatuses.value[chineseModel.value])
+const selectedAsrError = computed(() => asrErrors.value[chineseModel.value])
+const selectedAsrLoading = computed(() => !!asrLoading.value[chineseModel.value])
+
+async function loadAsrStatus(target = chineseModel.value) {
+  if (disposed || !ipc.isTauri()) return
+  const version = ++asrVersions[target]
+  asrLoading.value[target] = true
+  asrErrors.value[target] = ''
+  try {
+    const status = await asr.status(target)
+    if (!disposed && version === asrVersions[target]) asrStatuses.value[target] = status
+  } catch (e) {
+    if (!disposed && version === asrVersions[target]) asrErrors.value[target] = localizeBackendError(e)
+  } finally {
+    if (!disposed && version === asrVersions[target]) asrLoading.value[target] = false
+  }
+}
+
+async function installAsr() {
+  if (disposed || installingAsr.value) return
+  const target = chineseModel.value
+  installingAsr.value = target
+  try {
+    await asr.install(target)
+    if (!disposed) message.success(tr('{name} 安装完成', { name: target === 'sensevoice' ? 'SenseVoice' : 'Paraformer' }))
+  } catch (e) {
+    if (!disposed) message.error(localizeBackendError(e))
+  } finally {
+    installingAsr.value = null
+    await loadAsrStatus(target)
+  }
+}
+
+watch([engine, chineseModel], () => {
+  if (engine.value === 'chinese') void loadAsrStatus()
+})
+watch(engine, () => { translateEn.value = false }, { flush: 'sync' })
+watch([engine, chineseModel, cloudProvider, cloudModel, langs], () => {
+  if (engine.value === 'whisper') return
+  const allowed = new Set(langOptions.value.map((l) => l.value))
+  const filtered = langs.value.filter((lang) => allowed.has(lang))
+  if (filtered.length !== langs.value.length) langs.value = filtered.length ? filtered : [allowed.has('auto') ? 'auto' : (allowed.has('zh') ? 'zh' : [...allowed][0])]
+}, { flush: 'sync' })
+watch(supportsTranslation, (supported) => { if (!supported) translateEn.value = false }, { flush: 'sync' })
+watch([videoPath, engine, cloudProvider, cloudModel, langs, translateEn], () => {
+  translationRetry.value = false
+}, { flush: 'sync' })
 
 /* ------------------- 模型清单：默认选中已下载的模型 ------------------- */
 /**
@@ -90,6 +210,8 @@ const whisperFound = computed(() => !!store.tools.find((x) => x.name === 'whispe
 const modelList = ref<WhisperModelInfo[]>([])
 const installedModels = ref<string[]>([])
 const modelsLoaded = ref(false)
+const modelsLoading = ref(false)
+const modelsError = ref('')
 const configuredModel = computed(() => settingsStore.settings.whisper_model || '')
 const fallbackModel = computed(() =>
   modelsLoaded.value && configuredModel.value && !installedModels.value.includes(configuredModel.value)
@@ -97,25 +219,31 @@ const fallbackModel = computed(() =>
     : '',
 )
 async function loadModels() {
-  if (!ipc.isTauri()) return
+  if (disposed || !ipc.isTauri()) return
+  const version = ++modelLoadVersion
+  modelsLoading.value = true
+  modelsError.value = ''
   try {
     const rows = await ipc.listWhisperModels()
+    if (disposed || version !== modelLoadVersion) return
     modelList.value = rows
     installedModels.value = rows.filter((m) => m.downloaded).map((m) => m.name)
-  } catch (e) {
-    console.warn('读取模型清单失败', e)
-  } finally {
     modelsLoaded.value = true
+  } catch (e) {
+    if (disposed || version !== modelLoadVersion) return
+    modelsLoaded.value = false
+    modelsError.value = localizeBackendError(e)
+  } finally {
+    if (!disposed && version === modelLoadVersion) modelsLoading.value = false
   }
 }
 
 /* ------------- 模型就地下载 / 自定义链接导入（原设置页能力，搬到这里） ------------- */
 const customSpec = ref('')
 /**
- * 首屏自动选中的模型（配置的已下载就用它，否则回落）。
- * 它不算「用户换过」—— 回落不该改写用户存的偏好，所以 watcher 里要放它一马。
+ * 初始化回落不改写偏好；初始化后的每次明确选择都正常保存。
  */
-let initialModel = ''
+let initializingModel = true
 /** 'model:<file>' | 'custom' | null —— 同一时刻只跑一个下载 */
 const installing = ref<string | null>(null)
 const modelProgress = computed(() => store.toolProgress['whisper-model'])
@@ -130,9 +258,11 @@ async function downloadSelected() {
   installing.value = `model:${m.file}`
   try {
     const st = await ipc.installWhisperModel(m.name)
-    await switchModel(m, false)
-    message.success(
-      st?.origin
+    const activate = !disposed && model.value === m.name
+    if (activate) await switchModel(m, false)
+    else void store.refreshTools()
+    if (!disposed) message.success(
+      !activate ? tr('{name} 安装完成', { name: m.name }) : st?.origin
         ? tr('{name} 模型已下载并启用（来源：{source}）', { name: m.name, source: st.origin })
         : tr('{name} 模型已下载并启用', { name: m.name }),
     )
@@ -146,8 +276,8 @@ async function downloadSelected() {
 
 /** 切换使用的模型（文件已在磁盘上；换完立刻写回设置 → 下次开窗也是它） */
 async function switchModel(m: WhisperModelInfo, notify = true) {
-  model.value = m.name
   settingsStore.patch({ whisper_model: m.name } as any)
+  model.value = m.name
   await settingsStore.save()
   await loadModels()
   if (notify) message.success(tr('已切换到 {name}', { name: m.builtin ? m.name : m.file }))
@@ -159,16 +289,18 @@ async function importCustom() {
   const spec = customSpec.value.trim()
   if (!spec || installing.value) return
   installing.value = 'custom'
+  const previousModel = model.value
   try {
     const st = await ipc.installWhisperCustom(spec)
     const file = basename(st.path || '')
-    if (file) {
-      model.value = file
+    const activate = !disposed && model.value === previousModel && !!file
+    if (activate) {
       settingsStore.patch({ whisper_model: file } as any)
+      model.value = file
       await settingsStore.save()
     }
-    message.success(file ? tr('已导入自定义模型并切换为 {name}', { name: file }) : tr('已导入自定义模型'))
-    customSpec.value = ''
+    if (!disposed) message.success(activate ? tr('已导入自定义模型并切换为 {name}', { name: file }) : tr('已导入自定义模型'))
+    if (customSpec.value.trim() === spec) customSpec.value = ''
     void store.refreshTools()
   } catch (e: any) {
     message.error(localizeBackendError(e))
@@ -190,35 +322,41 @@ async function pickModelFile() {
 /** 下拉里换一个已下载的模型 = 直接启用（没下载的不写设置，等点「下载模型」） */
 watch(model, (name) => {
   // 首屏回落（自动改用已下载的模型）不算用户切换，不写回设置
-  if (!initialModel || name === initialModel) return
+  if (initializingModel) return
   const m = modelList.value.find((x) => x.name === name)
   if (!m?.downloaded || settingsStore.settings.whisper_model === name) return
   settingsStore.patch({ whisper_model: name } as any)
   void settingsStore.save()
   void store.refreshTools()
-})
+}, { flush: 'sync' })
 
-/** 一个可用模型都没有（配置的没下载、也没装别的）时才拦人 */
-const noModelAtAll = computed(() => modelsLoaded.value && !modelReady.value && !installedModels.value.length)
-const ready = computed(() => !noModelAtAll.value && whisperFound.value)
+/** Starting uses the selected model, so availability must describe that exact selection. */
+const ready = computed(() => {
+  if (engine.value === 'cloud') return ffmpegFound.value && cloudConfigValid(cloudConfig.value)
+  if (engine.value === 'chinese') return ffmpegFound.value && !!selectedAsrStatus.value?.ready
+    && !selectedAsrLoading.value && !selectedAsrError.value && installingAsr.value !== chineseModel.value
+  return modelsLoaded.value && !modelsLoading.value && !modelsError.value
+    && whisperFound.value && !!selectedModelInfo.value?.downloaded && !installing.value
+})
 
 /* ------------------------- 多语言 → 多任务 ------------------------- */
 /** 本次要起的任务：每个语言一个；开了翻译再给每个语言补一个英文任务 */
 const jobs = computed<{ lang: string; translate: boolean }[]>(() => {
   const out: { lang: string; translate: boolean }[] = []
   for (const l of langs.value) {
-    out.push({ lang: l, translate: false })
-    if (translateEn.value) out.push({ lang: l, translate: true })
+    if (!translationRetry.value) out.push({ lang: l, translate: false })
+    if (supportsTranslation.value && translateEn.value) out.push({ lang: l, translate: true })
   }
   return out
 })
 const taskCount = computed(() => jobs.value.length)
-const startLabel = computed(() =>
-  taskCount.value > 1 ? tr('开始转写（{n} 个任务）', { n: taskCount.value }) : tr('生成字幕'),
-)
+const startLabel = computed(() => engine.value === 'cloud'
+  ? taskCount.value > 1 ? tr('上传并生成字幕（{n} 个任务）', { n: taskCount.value }) : tr('上传并生成字幕')
+  : taskCount.value > 1 ? tr('开始转写（{n} 个任务）', { n: taskCount.value }) : tr('生成字幕'))
 
 function langLabel(v: string) {
   if (!v || v === 'auto') return tr('自动检测')
+  if (v === 'yue') return tr('粤语')
   return languages().find((l) => l.value === v)?.label ?? v
 }
 /** 队列行的元信息：语言（+ 英文翻译标记）· 模型 */
@@ -238,6 +376,7 @@ function productPath(t: SubtitleTask): string {
   return rowProductPath({
     video_path: t.video_path,
     language: t.language,
+    model: t.model,
     subtitle_path: t.subtitle_path,
     translated: isTranslated(t),
   })
@@ -264,15 +403,29 @@ async function pick() {
         { name: tr('全部文件'), extensions: ['*'] },
       ],
     })
-    if (typeof picked === 'string') videoPath.value = picked
+    if (!disposed && typeof picked === 'string') videoPath.value = picked
   } catch (e: any) {
     message.error(String(e?.message ?? e))
   }
 }
 
+async function pickOutputDir() {
+  if (choosingDir.value) return
+  choosingDir.value = true
+  try {
+    const picked = await openDialog({ directory: true, multiple: false, defaultPath: subtitleDir.value || settingsStore.settings.download_dir || undefined })
+    if (!disposed && typeof picked === 'string') outputDir.value = picked
+  } catch (e: any) {
+    if (!disposed) message.error(String(e?.message ?? e))
+  } finally {
+    choosingDir.value = false
+  }
+}
+
 /** 逐个语言各起一个任务（后端 start_subtitle 只收单语言，这里循环调用） */
 async function start() {
-  if (!videoPath.value) {
+  if (disposed || starting.value) return
+  if (!videoPath.value.trim()) {
     message.warning(tr('请先选择视频文件'))
     return
   }
@@ -280,18 +433,29 @@ async function start() {
     message.warning(tr('请至少选择一个识别语言'))
     return
   }
+  if (!ready.value) return
+  const request = {
+    videoPath: videoPath.value.trim(),
+    model: model.value,
+    outputFormat: outputFormat.value,
+    outputDir: outputDir.value || null,
+  }
+  const requestJobs = jobs.value.map((job) => ({ ...job }))
+  const requestEngine = engine.value === 'chinese' ? chineseModel.value : engine.value
+  const requestCloud = requestEngine === 'cloud' ? { ...cloudConfig.value } : undefined
+  translationRetry.value = false
   starting.value = true
   let ok = 0
   const errs: string[] = []
-  for (const job of jobs.value) {
+  for (const job of requestJobs) {
     try {
-      const t = await whisper.start({
-        videoPath: videoPath.value,
+      const opts = {
+        ...request,
         language: job.lang,
-        model: model.value,
         translateTo: job.translate ? 'en' : null,
-        outputFormat: outputFormat.value,
-      })
+      }
+      const t = requestEngine === 'whisper' ? await whisper.start(opts)
+        : await asr.start({ ...opts, model: null, engine: requestEngine, cloud: requestCloud })
       store.enqueueSubtitle(t)
       if (job.translate) translated.value = { ...translated.value, [t.id]: true }
       ok++
@@ -300,28 +464,59 @@ async function start() {
     }
   }
   starting.value = false
-  if (ok) message.success(tr('已开始 {n} 个转写任务', { n: ok }))
-  if (errs.length) message.error(errs.join(' ｜ '))
+  if (!disposed && ok) message.success(tr('已开始 {n} 个转写任务', { n: ok }))
+  if (!disposed && errs.length) message.error(errs.join(' ｜ '))
 }
 
 async function cancel(id: string) {
   await whisper.cancel(id)
 }
+const resuming = new Set<string>()
 async function resume(id: string) {
+  if (disposed || starting.value || resuming.has(id)) return
   const t = store.subtitles.find((x) => x.id === id)
   if (!t) return
+  if (t.model.startsWith('cloud:')) {
+    const restored = parseCloudTaskModel(t.model)
+    cloudProvider.value = restored.provider
+    clearCloudSecrets()
+    cloudModel.value = restored.model
+    if (CLOUD_PROVIDERS[restored.provider].editableUrl) cloudBaseUrl.value = ''
+    engine.value = 'cloud'
+    videoPath.value = t.video_path
+    langs.value = [t.language]
+    translateEn.value = supportsTranslation.value && isTranslated(t)
+    translationRetry.value = translateEn.value
+    message.info(tr('请确认云端配置，再点击「上传并生成字幕」重试。'))
+    return
+  }
+  const retryEngine = t.model === 'sensevoice' || t.model === 'paraformer' ? t.model : 'whisper'
+  const opts = {
+    videoPath: t.video_path,
+    language: t.language,
+    model: retryEngine === 'whisper' ? t.model : null,
+    translateTo: retryEngine === 'whisper' && isTranslated(t) ? 'en' : null,
+    outputFormat: outputFormat.value,
+  }
+  resuming.add(id)
   try {
-    const nt = await whisper.start({
-      videoPath: t.video_path,
-      language: t.language,
-      model: t.model,
-      translateTo: isTranslated(t) ? 'en' : null,
-      outputFormat: outputFormat.value,
-    })
+    if (retryEngine !== 'whisper') {
+      await loadAsrStatus(retryEngine)
+      if (disposed) return
+      if (!ffmpegFound.value || !asrStatuses.value[retryEngine]?.ready || asrErrors.value[retryEngine] || installingAsr.value) {
+        chineseModel.value = retryEngine
+        engine.value = 'chinese'
+        message.warning(tr('请先安装中文识别组件和 FFmpeg，再重试。'))
+        return
+      }
+    }
+    const nt = retryEngine === 'whisper' ? await whisper.start(opts) : await asr.start({ ...opts, engine: retryEngine })
     store.enqueueSubtitle(nt)
     if (isTranslated(t)) translated.value = { ...translated.value, [nt.id]: true }
   } catch (e: any) {
-    message.error(String(e?.message ?? e))
+    if (!disposed) message.error(String(e?.message ?? e))
+  } finally {
+    resuming.delete(id)
   }
 }
 async function remove(id: string) {
@@ -374,6 +569,7 @@ async function reveal(t: SubtitleTask) {
 const fileMeta = ref<Record<string, { size: number | null; exists: boolean }>>({})
 
 async function refreshFileMeta() {
+  const version = ++fileMetaVersion
   if (!ipc.isTauri()) return
   const paths = new Set<string>()
   // 取这一行自己的产物（译文行是 `-to-en` 那份；老记录里记的是原文文件，不能拿它当存在性依据）
@@ -389,6 +585,7 @@ async function refreshFileMeta() {
     const rows = await invoke<{ path: string; size: number | null; exists: boolean }[]>('file_sizes', {
       paths: [...paths],
     })
+    if (disposed || version !== fileMetaVersion) return
     const next: typeof fileMeta.value = {}
     for (const r of rows) next[r.path] = { size: r.size ?? null, exists: !!r.exists }
     fileMeta.value = next
@@ -412,15 +609,18 @@ function subtitleExists(t: SubtitleTask): boolean {
 
 /* 队列里任务一出现 / 状态一变（完成时）就刷新真实大小与存在性；进度跳动不触发（签名里不含 progress） */
 watch(
-  () => store.subtitles.map((t) => `${t.id}:${t.status}`).join('|'),
+  () => JSON.stringify(store.subtitles.map((t) => [t.id, t.status, productPath(t)])),
   () => void refreshFileMeta(),
   { immediate: true },
 )
 
 onMounted(async () => {
   if (!store.ready) await store.bootstrap()
+  if (disposed) return
   if (!settingsStore.loaded) await settingsStore.load()
+  if (disposed) return
   await loadModels()
+  if (disposed) return
   // 默认选中「真正能用」的模型：配置的已下载就用它，否则用已安装的（后端也会这样回落）
   const configured = settingsStore.settings.whisper_model || ''
   model.value = installedModels.value.includes(configured)
@@ -429,10 +629,11 @@ onMounted(async () => {
   // 应用设置中的字幕默认值（默认识别语言是单选，落成初始选中项）
   if (settingsStore.settings.subtitle_language) langs.value = [settingsStore.settings.subtitle_language]
   if (settingsStore.settings.subtitle_format) outputFormat.value = settingsStore.settings.subtitle_format
-  initialModel = model.value
+  initializingModel = false
   try {
     const wv = getCurrentWebview()
-    await wv.onDragDropEvent((ev) => {
+    const unlisten = await wv.onDragDropEvent((ev) => {
+      if (disposed) return
       const p = ev.payload as any
       if (p?.type === 'over') dragging.value = true
       else if (p?.type === 'drop') {
@@ -441,6 +642,8 @@ onMounted(async () => {
         if (paths.length) videoPath.value = paths[0]
       } else if (p?.type === 'leave') dragging.value = false
     })
+    if (disposed) unlisten()
+    else stopDrag = unlisten
   } catch {
     /* ignore */
   }
@@ -453,8 +656,6 @@ onMounted(async () => {
       <div class="umi-card-title">
         <NIcon :size="14" :component="ChatbubblesOutline" class="text-accent-pink" />{{ $t('视频 / 音频文件') }}
         <span class="umi-spacer" />
-        <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
-        <ModeSwitch />
       </div>
 
       <div class="flex gap-2">
@@ -465,19 +666,104 @@ onMounted(async () => {
         </button>
       </div>
 
+      <div class="mt-3">
+        <label class="umi-label">{{ $t('输出目录') }}</label>
+        <div class="flex gap-2">
+          <input :value="subtitleDir" class="umi-input min-w-0 flex-1" readonly :title="subtitleDir" :placeholder="$t('默认与源文件同目录')" data-test="subtitle-output-path" />
+          <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="choosingDir" data-test="subtitle-output-pick" @click="pickOutputDir">
+            <span class="flex items-center gap-1"><NIcon :size="14" :component="FolderOpenOutline" />{{ $t('选择目录') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <label class="umi-label">{{ $t('识别引擎') }}</label>
+        <NSelect v-model:value="engine" :options="engineOptions" size="small" data-test="subtitle-engine-select" />
+      </div>
+
+      <div v-if="engine === 'chinese'" class="mt-3" data-test="subtitle-chinese-config">
+        <label class="umi-label">{{ $t('中文模型') }}</label>
+        <NSelect v-model:value="chineseModel" :options="chineseModelOptions" size="small" data-test="subtitle-chinese-model" />
+        <div class="mt-1.5 flex flex-wrap items-center gap-2">
+          <span class="umi-hint min-w-0 flex-1" data-test="subtitle-asr-status">
+            {{ selectedAsrLoading ? $t('加载中…') : selectedAsrError || (selectedAsrStatus?.ready ? $t('已就绪 · 本地识别，音频不上传') : selectedAsrStatus?.message || $t('尚未安装中文识别组件')) }}
+          </span>
+          <button v-if="selectedAsrError" class="umi-btn umi-btn-xs" data-test="subtitle-asr-retry" @click="loadAsrStatus()">{{ $t('刷新') }}</button>
+          <button
+            v-if="!selectedAsrStatus?.ready || installingAsr === chineseModel"
+            class="umi-btn-primary umi-btn-xs shrink-0"
+            :disabled="!!installingAsr || selectedAsrLoading"
+            data-test="subtitle-asr-install"
+            @click="installAsr"
+          >{{ installingAsr === chineseModel ? $t('安装中…') : $t('安装引擎与模型') }}</button>
+        </div>
+        <p class="umi-hint mt-1">{{ $t('仅在点击安装后下载组件；中文模型只生成原文字幕。') }}</p>
+      </div>
+
+      <div v-if="engine === 'cloud'" class="mt-3 space-y-2" data-test="subtitle-cloud-config">
+        <div>
+          <label class="umi-label">{{ $t('云端服务商') }}</label>
+          <NSelect v-model:value="cloudProvider" :options="cloudProviderOptions" size="small" data-test="subtitle-cloud-provider" />
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div v-if="cloudPreset.editableUrl">
+            <label class="umi-label">{{ cloudProvider === 'azure' ? $t('Azure 资源地址') : $t('接口地址（Base URL）') }}</label>
+            <input v-model="cloudBaseUrl" class="umi-input w-full" type="url" spellcheck="false" autocomplete="off" :placeholder="cloudProvider === 'azure' ? 'https://your-resource.cognitiveservices.azure.com' : ''" data-test="subtitle-cloud-base" />
+          </div>
+          <div v-if="cloudPreset.showModel">
+            <label class="umi-label">{{ $t('云端模型') }}</label>
+            <input v-model="cloudModel" class="umi-input w-full" spellcheck="false" autocomplete="off" data-test="subtitle-cloud-model" />
+          </div>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div v-if="cloudPreset.credentials.includes('app_id')">
+            <label class="umi-label">{{ $t('应用 ID') }}</label>
+            <input v-model="cloudAppId" class="umi-input w-full" type="password" autocomplete="off" spellcheck="false" data-test="subtitle-cloud-app-id" />
+          </div>
+          <div v-if="cloudPreset.credentials.includes('api_key')">
+            <label class="umi-label">{{ $t('API 密钥（仅本次会话）') }}</label>
+            <input v-model="cloudApiKey" class="umi-input w-full" type="password" autocomplete="off" spellcheck="false" data-test="subtitle-cloud-key" />
+          </div>
+          <div v-if="cloudPreset.credentials.includes('secret_id')">
+            <label class="umi-label">Secret ID</label>
+            <input v-model="cloudSecretId" class="umi-input w-full" type="password" autocomplete="off" spellcheck="false" data-test="subtitle-cloud-secret-id" />
+          </div>
+          <div v-if="cloudPreset.credentials.includes('secret_key')">
+            <label class="umi-label">Secret Key</label>
+            <input v-model="cloudSecretKey" class="umi-input w-full" type="password" autocomplete="off" spellcheck="false" data-test="subtitle-cloud-secret-key" />
+          </div>
+        </div>
+        <button class="umi-btn umi-btn-sm" :disabled="!cloudApiKey && !cloudAppId && !cloudSecretId && !cloudSecretKey" data-test="subtitle-cloud-clear-key" @click="clearCloudSecrets">{{ $t('清空密钥') }}</button>
+        <p class="umi-hint" data-test="subtitle-cloud-notice">{{ $t('点击「上传并生成字幕」会将音频上传至所填接口，可能产生服务费用。密钥不会保存。') }}</p>
+        <p v-if="translationRetry" class="umi-hint" data-test="subtitle-translation-retry">{{ $t('请确认云端配置，再点击「上传并生成字幕」重试。') }} {{ $t('→ 英文') }}</p>
+        <p v-if="cloudProvider === 'compatible'" class="umi-hint">{{ $t('需支持分段时间戳的 Whisper 兼容接口；远程地址须使用 HTTPS，本机接口可不填密钥。') }}</p>
+        <p v-if="cloudProvider === 'baidu'" class="umi-hint">{{ $t('百度极速转写目前需要开通邀测权限。') }}</p>
+        <p v-if="cloudProvider === 'xunfei'" class="umi-hint">{{ $t('讯飞默认自动识别中文、英文和方言。') }}</p>
+      </div>
+
+      <div v-if="engine !== 'whisper' && !ffmpegFound" class="mt-2.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200/90">
+        {{ $t('请先在设置中安装 FFmpeg，以提取音频。') }}
+      </div>
+
       <div
-        v-if="!ready"
+        v-if="engine === 'whisper' && !ready"
         class="mt-2.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200/90"
       >
         <div class="flex items-center gap-2">
           <NIcon :size="14" :component="SparklesOutline" />
-          <span v-if="!whisperFound">{{ $t('尚未安装 Whisper 引擎，请前往「设置 → 依赖工具」一键安装。') }}</span>
+          <template v-if="modelsError">
+            <span class="min-w-0 flex-1">{{ $t('读取模型清单失败') }}：{{ modelsError }}</span>
+            <button class="umi-btn umi-btn-xs shrink-0" data-test="subtitle-model-retry" @click="loadModels">{{ $t('刷新') }}</button>
+          </template>
+          <span v-else-if="!modelsLoaded || modelsLoading">{{ $t('加载中…') }}</span>
+          <span v-else-if="!whisperFound">{{ $t('尚未安装 Whisper 引擎，请前往「设置 → 依赖工具」一键安装。') }}</span>
+          <span v-else-if="installing">{{ $t('安装中…') }}</span>
           <span v-else>{{ $t('尚未下载语音模型「{model}」—— 点下方「下载模型」直接安装，或用「自定义模型」贴链接导入。', { model }) }}</span>
         </div>
       </div>
       <!-- 配置的模型没下载、但装了别的模型：本次会自动改用已安装的那个（后端同一套回落逻辑） -->
       <div
-        v-else-if="fallbackModel"
+        v-else-if="engine === 'whisper' && fallbackModel"
         class="mt-2.5 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[12px] text-sky-200/90"
         data-test="subtitle-model-fallback"
       >
@@ -500,7 +786,7 @@ onMounted(async () => {
         />
       </div>
 
-      <div class="mt-3" data-test="subtitle-params-visible">
+      <div v-if="engine === 'whisper'" class="mt-3" data-test="subtitle-params-visible">
         <div>
           <label class="umi-label">{{ $t('Whisper 模型') }}</label>
           <NSelect
@@ -546,26 +832,23 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 高级选项（1.10）：导出格式 / 翻译成英文收进默认折叠区组；简单模式整体不渲染 -->
-      <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3">
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label class="umi-label">{{ $t('导出格式') }}</label>
-            <NSelect v-model:value="outputFormat" :options="fmtOptions" size="small" />
-          </div>
-          <div>
-            <label class="umi-label">{{ $t('翻译成英文') }}</label>
-            <div class="flex h-[34px] items-center gap-2">
-              <NSwitch v-model:value="translateEn" size="small" data-test="translate-en" />
-              <span class="umi-hint">{{ $t('每个语言额外生成一份英文字幕') }}</span>
-            </div>
+      <div class="mt-3">
+        <label class="umi-label">{{ $t('导出格式') }}</label>
+        <NSelect v-model:value="outputFormat" :options="fmtOptions" size="small" />
+      </div>
+      <SettingsGroup v-if="supportsTranslation" :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3" always>
+        <div>
+          <label class="umi-label">{{ $t('翻译成英文') }}</label>
+          <div class="flex h-[34px] items-center gap-2">
+            <NSwitch v-model:value="translateEn" size="small" data-test="translate-en" />
+            <span class="umi-hint">{{ $t('每个语言额外生成一份英文字幕') }}</span>
           </div>
         </div>
       </SettingsGroup>
 
       <!-- 自定义模型：贴链接 / 本地文件直接安装并启用（收成一行，不占版面）。
            常显（不进折叠区组）：模型安装入口在简单模式下也要一眼可见 -->
-      <div class="mt-2.5 flex flex-wrap items-center gap-1.5" data-test="subtitle-custom-model">
+      <div v-if="engine === 'whisper'" class="mt-2.5 flex flex-wrap items-center gap-1.5" data-test="subtitle-custom-model">
         <span class="s-text-3 shrink-0 text-[11px]">{{ $t('自定义模型') }}</span>
         <input
           v-model="customSpec"
@@ -600,10 +883,10 @@ onMounted(async () => {
       </div>
 
       <div class="mt-3 flex flex-wrap items-center justify-between gap-3 border-t s-border-soft pt-3">
-        <span class="umi-hint">{{ $t('流程：FFmpeg 提取音频 → Whisper 语音识别 → 生成时间轴 → 导出字幕文件') }}</span>
+        <span class="umi-hint">{{ engine === 'whisper' ? $t('流程：FFmpeg 提取音频 → Whisper 语音识别 → 生成时间轴 → 导出字幕文件') : engine === 'chinese' ? $t('流程：提取音频 → 本地中文识别 → 导出字幕文件') : $t('流程：提取音频 → 上传至所填接口 → 导出字幕文件') }}</span>
         <button
           class="umi-btn-primary"
-          :disabled="!videoPath || starting"
+          :disabled="!videoPath || !langs.length || !ready || starting"
           data-test="subtitle-start"
           @click="start"
         >
@@ -643,7 +926,7 @@ onMounted(async () => {
           @resume="resume(t.id)"
         />
       </div>
-      <div v-else class="umi-card flex flex-col items-center gap-2 py-12 s-text-3">
+      <div v-else class="flex items-center justify-center gap-2 py-6 s-text-3">
         <NIcon :size="26" :component="ChatbubblesOutline" />
         <div class="text-[12px]">{{ $t('还没有字幕任务') }}</div>
       </div>

@@ -156,6 +156,7 @@ const PATH_PICKABLE: Record<string, 'ytdlp' | 'ffmpeg' | 'whisper'> = {
 
 /** 单个工具：下载 / 重装（后端会覆盖同名文件并重新校验） */
 async function installTool(name: string) {
+  if (installing.value) return
   installing.value = name
   try {
     await ipc.installTool(name)
@@ -602,7 +603,7 @@ watch(() => route.query.tab, applyQueryTab)
                 v-if="PATH_PICKABLE[t.name]"
                 class="umi-btn umi-btn-xs"
                 :data-test="`tool-path-${t.name}`"
-                @click="pickTool(t.name as 'ytdlp' | 'ffmpeg' | 'whisper')"
+                @click="pickTool(PATH_PICKABLE[t.name])"
               >{{ $t('指定路径') }}</button>
               <button
                 v-if="t.installable"

@@ -67,6 +67,8 @@ function resetWorld() {
 }
 
 function installInvokeStub() {
+  // The native event plugin removes its callback before sending the unlisten command.
+  ;(window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} }
   let cbId = 0
   const handlers: Record<string, (args: any) => unknown> = {
     list_downloads: () => [],

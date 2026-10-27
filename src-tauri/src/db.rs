@@ -292,6 +292,14 @@ impl Db {
         Ok(self.list_converts()?.into_iter().find(|t| t.id == id))
     }
 
+    pub fn get_convert_request(&self, id: &str) -> anyhow::Result<Option<ConvertRequest>> {
+        let conn = self.lock();
+        let json: Option<Option<String>> = conn.query_row(
+            "SELECT request FROM converts WHERE id=?1", params![id], |row| row.get(0),
+        ).optional()?;
+        json.flatten().map(|raw| serde_json::from_str(&raw).map_err(Into::into)).transpose()
+    }
+
     pub fn reset_stale_converts(&self) -> anyhow::Result<usize> {
         let conn = self.lock();
         Ok(conn.execute(
@@ -419,6 +427,22 @@ mod fix19_tests {
     fn mem_db() -> Db {
         Db::open(&std::env::temp_dir().join(format!("umi-db-19-{}.db", crate::ctx::short_id())))
             .unwrap()
+    }
+
+    #[test]
+    fn conversion_retry_restores_original_parameters_after_progress_updates() {
+        let db = mem_db();
+        let req = ConvertRequest { input_file: "clip.mp4".into(), format: "webm".into(),
+            resolution: Some("1280x720".into()), crf: Some(18), ..ConvertRequest::default() };
+        let mut task = crate::converter::new_convert_task(&req, Path::new("clip.webm"), 1);
+        db.upsert_convert(&task, Some(&serde_json::to_string(&req).unwrap())).unwrap();
+        task.progress = 50.0;
+        db.upsert_convert(&task, None).unwrap();
+        let restored = db.get_convert_request(&task.id).unwrap().unwrap();
+        assert_eq!(restored.format, "webm");
+        assert_eq!(restored.resolution.as_deref(), Some("1280x720"));
+        assert_eq!(restored.crf, Some(18));
+        assert!(db.get_convert_request("missing").unwrap().is_none());
     }
 
     /// 译文标记要能存进库、并在列表里回填（重启后队列行仍能标「→ 英文」）

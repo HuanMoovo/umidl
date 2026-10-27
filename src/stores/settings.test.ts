@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { DEFAULT_QUEUE_LAYOUT, FALLBACK_SETTINGS, useSettingsStore } from '@/stores/settings'
 import type { AppSettings } from '@/types'
@@ -16,6 +16,13 @@ const LAYOUT_KEY = 'umi.queue_layout'
 /** 后端返回的设置（Rust 结构体里没有 queue_layout，模拟真实往返） */
 const backendSettings = { ...FALLBACK_SETTINGS, download_dir: 'D:/downloads' } as AppSettings
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   localStorage.clear()
   vi.mocked(ipc.getSettings).mockReset().mockResolvedValue({ ...backendSettings })
@@ -27,6 +34,194 @@ beforeEach(() => {
     return copy as unknown as AppSettings
   })
   setActivePinia(createPinia())
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+describe('settings request ordering', () => {
+  it('settles a stalled initial read and ignores its response after a successful retry', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.getSettings).mockReturnValueOnce(pending.promise).mockResolvedValue({ ...backendSettings, concurrency: 6 })
+    const store = useSettingsStore()
+    let settled = false
+    const loading = store.load().then(() => { settled = true })
+    store.settings.theme = 'light'
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(settled).toBe(true)
+    await loading
+    expect(store.loaded).toBe(true)
+    expect(store.loadFailed).toBe(true)
+    expect(store.settings.theme).toBe('light')
+
+    await store.load()
+    expect(store.loadFailed).toBe(false)
+    expect(store.settings.concurrency).toBe(6)
+    pending.resolve({ ...backendSettings, concurrency: 3 })
+    await Promise.resolve()
+    expect(store.settings.concurrency).toBe(6)
+  })
+
+  it('retains loaded settings if only the default-directory lookup fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(ipc.getSettings).mockResolvedValue({ ...backendSettings, download_dir: '', theme: 'light', concurrency: 6 })
+    vi.mocked(ipc.defaultDownloadDir).mockRejectedValue(new Error('directory unavailable'))
+    const store = useSettingsStore()
+    await store.load()
+
+    expect(store.settings.theme).toBe('light')
+    expect(store.settings.concurrency).toBe(6)
+    expect(store.loaded).toBe(true)
+  })
+
+  it('hydrates persisted fields before saving an edit made during the initial load', async () => {
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.getSettings).mockReturnValue(pending.promise)
+    const store = useSettingsStore()
+    const loading = store.load()
+    store.settings.theme = 'light'
+    const saving = store.save()
+    await Promise.resolve()
+    expect(ipc.saveSettings).not.toHaveBeenCalled()
+    pending.resolve({ ...backendSettings, concurrency: 6 })
+    await Promise.all([loading, saving])
+
+    const persisted = vi.mocked(ipc.saveSettings).mock.calls[0][0]
+    expect(persisted.concurrency).toBe(6)
+    expect(persisted.theme).toBe('light')
+    expect(store.settings.concurrency).toBe(6)
+    expect(store.settings.theme).toBe('light')
+  })
+
+  it('reads settings after an already pending save has persisted', async () => {
+    const pending = deferred<AppSettings>()
+    let persisted = { ...backendSettings }
+    vi.mocked(ipc.saveSettings).mockImplementation(async () => {
+      persisted = await pending.promise
+      return persisted
+    })
+    vi.mocked(ipc.getSettings).mockImplementation(async () => persisted)
+    const store = useSettingsStore()
+    store.settings.theme = 'light'
+    const saving = store.save()
+    const loading = store.load()
+    await Promise.resolve()
+    expect(ipc.getSettings).not.toHaveBeenCalled()
+    pending.resolve({ ...backendSettings, theme: 'light' })
+    await Promise.all([saving, loading])
+
+    expect(store.settings.theme).toBe('light')
+  })
+
+  it('coalesces concurrent loads and preserves edits made before the response', async () => {
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.getSettings).mockReturnValue(pending.promise)
+    const store = useSettingsStore()
+    const first = store.load()
+    const second = store.load()
+    store.settings.theme = 'light'
+    store.patch({ download_dir: 'D:/chosen' })
+
+    pending.resolve({ ...backendSettings, concurrency: 6 })
+    await Promise.all([first, second])
+
+    expect(store.settings.theme).toBe('light')
+    expect(store.settings.download_dir).toBe('D:/chosen')
+    expect(store.settings.concurrency).toBe(6)
+    expect(ipc.getSettings).toHaveBeenCalledTimes(1)
+    expect(store.loaded).toBe(true)
+  })
+
+  it('keeps a chosen directory while the default-directory lookup is pending', async () => {
+    const pending = deferred<string>()
+    vi.mocked(ipc.getSettings).mockResolvedValue({ ...backendSettings, download_dir: '' })
+    vi.mocked(ipc.defaultDownloadDir).mockReturnValue(pending.promise)
+    const store = useSettingsStore()
+    const loading = store.load()
+    await vi.waitFor(() => expect(ipc.defaultDownloadDir).toHaveBeenCalledTimes(1))
+    store.settings.download_dir = 'D:/chosen'
+    pending.resolve('D:/default')
+    await loading
+
+    expect(store.settings.download_dir).toBe('D:/chosen')
+  })
+
+  it('keeps edits made during a save and applies normalization to untouched fields', async () => {
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.saveSettings).mockReturnValue(pending.promise)
+    const store = useSettingsStore()
+    store.patch({ concurrency: 99 })
+    const saving = store.save()
+    store.settings.theme = 'light'
+    store.patch({ download_dir: 'D:/chosen' })
+    pending.resolve({ ...backendSettings, concurrency: 16 })
+    await saving
+
+    expect(store.settings.theme).toBe('light')
+    expect(store.settings.download_dir).toBe('D:/chosen')
+    expect(store.settings.concurrency).toBe(16)
+    expect(store.saving).toBe(false)
+  })
+
+  it('preserves a field edited back to its initial value while loading', async () => {
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.getSettings).mockReturnValue(pending.promise)
+    const store = useSettingsStore()
+    const loading = store.load()
+    store.settings.theme = 'light'
+    store.settings.theme = 'dark'
+    pending.resolve({ ...backendSettings, theme: 'light' })
+    await loading
+
+    expect(store.settings.theme).toBe('dark')
+  })
+
+  it('writes rapid saves in request order and stays busy until the last write finishes', async () => {
+    const firstResponse = deferred<AppSettings>()
+    const secondResponse = deferred<AppSettings>()
+    let persistedTheme = 'dark'
+    vi.mocked(ipc.saveSettings).mockImplementation(async (snapshot) => {
+      const response = await (snapshot.theme === 'light' ? firstResponse.promise : secondResponse.promise)
+      persistedTheme = response.theme
+      return response
+    })
+    const store = useSettingsStore()
+    store.settings.theme = 'light'
+    const first = store.save()
+    store.settings.theme = 'dark'
+    const second = store.save()
+    await vi.waitFor(() => expect(ipc.saveSettings).toHaveBeenCalled())
+
+    expect(ipc.saveSettings).toHaveBeenCalledTimes(1)
+    firstResponse.resolve({ ...backendSettings, theme: 'light' })
+    await first
+    expect(store.saving).toBe(true)
+    expect(store.settings.theme).toBe('dark')
+    secondResponse.resolve({ ...backendSettings, theme: 'dark' })
+    await second
+
+    expect(persistedTheme).toBe('dark')
+    expect(store.saving).toBe(false)
+  })
+
+  it('allows a later save to succeed after an earlier queued write fails', async () => {
+    const pending = deferred<AppSettings>()
+    vi.mocked(ipc.saveSettings).mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ ...backendSettings, theme: 'light' })
+    const store = useSettingsStore()
+    const first = store.save().catch((error) => error)
+    store.settings.theme = 'light'
+    const second = store.save()
+    pending.reject(new Error('disk busy'))
+    expect(await first).toBeInstanceOf(Error)
+    await second
+
+    expect(store.settings.theme).toBe('light')
+    expect(store.saving).toBe(false)
+  })
 })
 
 describe('设置：下载队列布局 queue_layout', () => {

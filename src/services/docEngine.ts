@@ -35,6 +35,7 @@ export const FALLBACK_DOC_EXTS = [
   'pdf', 'doc', 'docx', 'docm', 'odt', 'rtf', 'txt', 'md', 'html', 'htm', 'epub',
   'xls', 'xlsx', 'xlsm', 'ods', 'csv', 'tsv',
   'ppt', 'pptx', 'pps', 'ppsx', 'odp',
+  'markdown', 'xhtml', 'rst', 'org',
 ] as const
 
 /** 后端能力表取不到时的兜底目标格式 */
@@ -63,7 +64,8 @@ export function normalizeExt(ext: string): string {
 export function isDocExt(ext: string, native?: string[] | null): boolean {
   const e = normalizeExt(ext)
   if (!e) return false
-  const list = native && native.length ? native : FALLBACK_DOC_EXTS
+  // Native is an additional capability list, not the complete list of document inputs.
+  const list = [...FALLBACK_DOC_EXTS, ...(native ?? [])]
   return list.map(normalizeExt).includes(e)
 }
 

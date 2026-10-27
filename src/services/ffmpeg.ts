@@ -35,6 +35,7 @@ export const ffmpeg = {
   probe: (path: string): Promise<MediaProbe> => ipc.probeMedia(path),
 
   start(opts: ConvertOptions): Promise<ConvertTask> {
+    opts = prepareConversionOptions(opts)
     const req: ConvertRequest = {
       input_file: opts.inputFile,
       output_dir: opts.outputDir ?? null,
@@ -170,18 +171,25 @@ export function suggestCodecs(format: string, extractAudio: boolean): { video: s
     case 'webm':
       return { video: 'libvpx-vp9', audio: 'libopus' }
     case 'ogv':
-      return { video: 'libvpx', audio: 'libvorbis' }
+      return { video: 'libtheora', audio: 'libvorbis' }
     case 'avi':
       return { video: 'libx264', audio: 'libmp3lame' }
     case 'flv':
       return { video: 'libx264', audio: 'aac' }
     case 'wmv':
-      return { video: 'mpeg4', audio: 'wma' }
+      return { video: 'wmv2', audio: 'wmav2' }
     case 'gif':
       return { video: 'gif', audio: 'none' }
     case 'ts':
-    case 'mpg':
       return { video: 'libx264', audio: 'aac' }
+    case 'mpg':
+    case 'vob':
+    case 'm2v':
+      return { video: 'mpeg2video', audio: 'mp2' }
+    case 'asf':
+      return { video: 'wmv2', audio: 'wmav2' }
+    case '3gp':
+      return { video: 'h263', audio: 'aac' }
     case 'mkv':
     case 'mov':
     case 'm4v':
@@ -204,13 +212,23 @@ export function audioFor(format: string): string {
     case 'wav':
       return 'pcm_s16le'
     case 'aiff':
-      return 'pcm_s16le'
+      return 'pcm_s16be'
     case 'wma':
       return 'wmav2'
     case 'ac3':
       return 'ac3'
     case 'alac':
       return 'alac'
+    case 'amr':
+      return 'libopencore_amrnb'
+    case 'dts':
+      return 'dca'
+    case 'tta':
+      return 'tta'
+    case 'mp2':
+      return 'mp2'
+    case 'au':
+      return 'pcm_s16be'
     case 'm4a':
       return 'aac'
     default:
@@ -237,6 +255,7 @@ export function atempoChain(speed: number): string {
 
 /** 构建 ffmpeg 参数（纯函数，可单测；与 Rust 端 build_ffmpeg_args 保持一致） */
 export function buildFfmpegArgs(o: ConvertOptions): string[] {
+  o = prepareConversionOptions(o)
   const args = ['-hide_banner', '-nostdin', '-y']
   if (o.hwaccel) args.push('-hwaccel', 'auto')
   args.push('-i', o.inputFile, '-progress', 'pipe:1', '-nostats')
@@ -289,6 +308,19 @@ export function buildFfmpegArgs(o: ConvertOptions): string[] {
 
   if (o.outputFile) args.push(o.outputFile)
   return args
+}
+
+/** Stream copy cannot process decoded frames or samples. Keep unaffected streams copied. */
+export function prepareConversionOptions(o: ConvertOptions): ConvertOptions {
+  const next = { ...o }
+  const speedChanged = !!o.speed && Math.abs(o.speed - 1) > 0.0001
+  const videoChanged = speedChanged || !!o.fps || (!!o.resolution && o.resolution !== '原分辨率') || (!!o.bitrate && o.bitrate !== 'auto')
+  const audioChanged = speedChanged || !!o.sampleRate || !!o.channels || (!!o.audioBitrate && o.audioBitrate !== 'auto')
+  const defaults = suggestCodecs(o.format, !!o.extractAudio)
+  if (videoChanged && o.videoCodec === 'copy') next.videoCodec = defaults.video
+  if (audioChanged && o.audioCodec === 'copy') next.audioCodec = defaults.audio
+  if (videoChanged || audioChanged) next.autoFormat = false
+  return next
 }
 
 /** 编解码器别名归一化（与 Rust 端 normalize_video_codec 保持一致） */

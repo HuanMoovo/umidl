@@ -579,3 +579,14 @@ html[data-grad='1'] .umi-nav-bar {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Keep forms usable in narrow app panels as well as the desktop window. */
+.umi-input { min-width: 0; }
+.conversion-page [data-role='format-grid'] button { min-height: 44px; }
+.conversion-page [data-role='source-input'] { text-overflow: ellipsis; }
+@media (max-width: 639px) {
+  .conversion-page [data-role='convert-flow'] { padding: 16px; }
+  .conversion-page [data-role='file-area'] > div:first-child > span:last-child { display: none; }
+  .conversion-page [data-role='format-search'] { min-width: 0; }
+  .conversion-page [data-role='start-convert'] { width: 100%; justify-content: center; }
+}

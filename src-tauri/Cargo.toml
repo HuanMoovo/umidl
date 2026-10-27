@@ -1,6 +1,6 @@
 [package]
 name = "umidl"
-version = "1.8.11"
+version = "1.10.0"
 description = "Umidl - 轻量化视频下载 / 转换 / AI 字幕桌面客户端"
 authors = ["umi"]
 edition = "2021"
@@ -23,7 +23,7 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["time"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream", "multipart"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 dirs = "5"
@@ -33,6 +33,8 @@ thiserror = "1"
 regex = "1"
 quick-xml = "0.42"
 sha2 = "0.10"
+ring = "0.17.14"
+base64 = "0.22"
 rquickjs = "0.14"
 
 # Unix 侧需要按进程组杀进程树（见 tools.rs::kill_tree）：Windows 用 taskkill /T，

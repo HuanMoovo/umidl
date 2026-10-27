@@ -1,9 +1,52 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { ConvertTask, DownloadTask, SubtitleTask, TestCase, TestReport, ToolProgress, ToolStatus } from '@/types'
 import * as ipc from '@/services/ipc'
 import { enqueueOnce, dropById, dropWhere, isFinishedDownload } from '@/services/taskList'
+
+const STARTUP_TIMEOUT_MS = 10_000
+
+function startupWait<T>(request: Promise<T>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Startup operation timed out')), timeoutMs)
+  })
+  return Promise.race([request, timeout]).finally(() => clearTimeout(timer))
+}
+
+/** 快照读回时重放期间发生的事件/本地操作，避免进度回退或已删任务重新出现。 */
+function taskQueue<T>(list: Ref<T[]>, fetch: () => Promise<T[]>) {
+  let changes: ((items: T[]) => void)[] | null = null
+  let loading: Promise<void> | null = null
+  let loaded = false
+
+  function change(apply: (items: T[]) => void) {
+    apply(list.value)
+    changes?.push(apply)
+  }
+
+  function load(timeoutMs = STARTUP_TIMEOUT_MS) {
+    if (loading) return loading
+    loaded = false
+    const pending = changes ?? []
+    changes = pending
+    loading = (async () => {
+      try {
+        const snapshot = await startupWait(Promise.resolve().then(fetch), timeoutMs)
+        pending.forEach((apply) => apply(snapshot))
+        list.value = snapshot
+        loaded = true
+      } finally {
+        changes = null
+        loading = null
+      }
+    })()
+    return loading
+  }
+
+  return { change, load, capture: () => { changes ??= [] }, get loaded() { return loaded } }
+}
 
 export const useTaskStore = defineStore('tasks', () => {
   /** 工具刷新的前端兜底超时（后端已有探活超时 + 总预算，这里保证界面一定解锁） */
@@ -17,6 +60,11 @@ export const useTaskStore = defineStore('tasks', () => {
   const testCatalog = ref<{ id: string; group: string; name: string; heavy: boolean }[]>([])
   const toolProgress = ref<Record<string, ToolProgress>>({})
   const ready = ref(false)
+  const startupFailed = ref(false)
+  const downloadQueue = taskQueue(downloads, () => ipc.listDownloads())
+  const convertQueue = taskQueue(converts, () => ipc.listConverts())
+  const subtitleQueue = taskQueue(subtitles, () => ipc.listSubtitles())
+  const queues = [downloadQueue, convertQueue, subtitleQueue]
 
   /* ---------- 派生 ---------- */
   const activeDownloads = computed(() =>
@@ -54,13 +102,13 @@ export const useTaskStore = defineStore('tasks', () => {
    * 旧状态）。enqueueOnce 只在缺行时补一条。
    */
   function enqueueDownload(t: DownloadTask) {
-    enqueueOnce(downloads.value, t)
+    downloadQueue.change((list) => enqueueOnce(list, t))
   }
   function enqueueConvert(t: ConvertTask) {
-    enqueueOnce(converts.value, t)
+    convertQueue.change((list) => enqueueOnce(list, t))
   }
   function enqueueSubtitle(t: SubtitleTask) {
-    enqueueOnce(subtitles.value, t)
+    subtitleQueue.change((list) => enqueueOnce(list, t))
   }
 
   /**
@@ -72,9 +120,9 @@ export const useTaskStore = defineStore('tasks', () => {
    * 「库里删了、界面还在」（实机复现过的 bug）。后端报错时不要调用本函数。
    */
   function dropTask(id: string | null | undefined) {
-    dropById(downloads.value, id)
-    dropById(converts.value, id)
-    dropById(subtitles.value, id)
+    downloadQueue.change((list) => dropById(list, id))
+    convertQueue.change((list) => dropById(list, id))
+    subtitleQueue.change((list) => dropById(list, id))
   }
 
   /**
@@ -82,61 +130,93 @@ export const useTaskStore = defineStore('tasks', () => {
    * `done` = 只摘终态行（done / error / canceled），`all` = 整列清空。
    */
   function dropDownloads(which: 'done' | 'all') {
-    dropWhere(downloads.value, which === 'all' ? () => true : isFinishedDownload)
+    downloadQueue.change((list) => dropWhere(list, which === 'all' ? () => true : isFinishedDownload))
   }
 
+  const subscriptions = [
+    { event: 'download://update', queue: downloadQueue, listen: () => ipc.onEvent('download://update', (t) => downloadQueue.change((list) => upsert(list, t))) },
+    {
+      event: 'download://removed',
+      queue: downloadQueue,
+      listen: () => ipc.onEvent('download://removed', (p) => {
+        if (p?.all) dropDownloads('all')
+        else if (p?.id) downloadQueue.change((list) => dropById(list, p.id))
+      }),
+    },
+    { event: 'convert://update', queue: convertQueue, listen: () => ipc.onEvent('convert://update', (t) => convertQueue.change((list) => upsert(list, t))) },
+    { event: 'subtitle://update', queue: subtitleQueue, listen: () => ipc.onEvent('subtitle://update', (t) => subtitleQueue.change((list) => upsert(list, t))) },
+    { event: 'selftest://update', listen: () => ipc.onEvent('selftest://update', (c) => upsert(selftestCases.value, c)) },
+    {
+      event: 'tool://progress',
+      listen: () => ipc.onEvent('tool://progress', (p) => {
+        toolProgress.value = {
+          ...toolProgress.value,
+          [p.name]: {
+            percent: p.percent,
+            message: p.message,
+            source: p.source,
+            downloaded: p.downloaded,
+            total: p.total,
+            resumed: p.resumed,
+          },
+        }
+      }),
+    },
+  ]
+  const unlisteners = new Map<string, () => void>()
+  let disposed = false
+  onScopeDispose(() => {
+    disposed = true
+    unlisteners.forEach((unlisten) => unlisten())
+    unlisteners.clear()
+  })
+
   let booting: Promise<void> | null = null
+  let backgroundStarted = false
   async function bootstrap() {
-    if (ready.value) return
     if (booting) return booting // 多个视图可能同时触发，复用同一次初始化
-    booting = (async () => {
+    if (disposed || (ready.value && queues.every((queue) => queue.loaded) && unlisteners.size === subscriptions.length)) return
+    const attempt = (async () => {
       const t0 = performance.now()
-      try {
-        const [d, c, s] = await Promise.all([
-          ipc.listDownloads(),
-          ipc.listConverts(),
-          ipc.listSubtitles(),
-        ])
-        downloads.value = d
-        converts.value = c
-        subtitles.value = s
-      } catch (e) {
-        console.warn('初始化数据失败', e)
-      }
-      const tData = performance.now() - t0
-      // 事件订阅（并行注册，减少启动等待）
-      await Promise.all([
-        ipc.onEvent('download://update', (t) => upsert(downloads.value, t)),
-        // 删除/清理后把卡片从列表移除，否则界面看起来"删了没反应"
-        // （视图侧的删除也走同一个出口 store.dropTask / dropDownloads）
-        ipc.onEvent('download://removed', (p) => {
-          if (p?.all) {
-            dropDownloads('all')
-          } else if (p?.id) {
-            dropById(downloads.value, p.id)
+      const deadline = Date.now() + STARTUP_TIMEOUT_MS
+      const remaining = () => Math.max(0, deadline - Date.now())
+      const pendingSubscriptions = subscriptions.filter(({ event }) => !unlisteners.has(event))
+      const pendingQueues = new Set(queues.filter((queue) => !queue.loaded))
+      // 缺失监听期间可能错过完成/删除事件；重连后同步对应队列，补齐这段空窗。
+      if (ready.value) pendingSubscriptions.forEach(({ queue }) => { if (queue) pendingQueues.add(queue) })
+      pendingQueues.forEach((queue) => queue.capture())
+      // 先订阅再读取快照；失败只影响当前项目，下次 bootstrap 只重试缺失项。
+      const subscriptionResults = await Promise.allSettled(
+        pendingSubscriptions.map(async ({ event, listen }) => {
+          let active = true
+          const registration = listen().then((unlisten) => {
+            if (!active || disposed) unlisten()
+            else unlisteners.set(event, unlisten)
+          })
+          try {
+            await startupWait(registration, remaining())
+          } catch (e) {
+            // 原生注册不能取消；超时后若迟到，立即撤掉，避免重试留下双份监听。
+            active = false
+            throw e
           }
         }),
-        ipc.onEvent('convert://update', (t) => upsert(converts.value, t)),
-        ipc.onEvent('subtitle://update', (t) => upsert(subtitles.value, t)),
-        ipc.onEvent('selftest://update', (c) => upsert(selftestCases.value, c)),
-        ipc.onEvent('tool://progress', (p) => {
-          toolProgress.value = {
-            ...toolProgress.value,
-            [p.name]: {
-              percent: p.percent,
-              message: p.message,
-              source: p.source,
-              downloaded: p.downloaded,
-              total: p.total,
-              resumed: p.resumed,
-            },
-          }
-        }),
-      ])
+      )
+      subscriptionResults.forEach((result) => {
+        if (result.status === 'rejected') console.warn('初始化事件订阅失败', result.reason)
+      })
+      const tSubscriptions = performance.now() - t0
+      const dataResults = await Promise.allSettled([...pendingQueues].map((queue) => queue.load(remaining())))
+      dataResults.forEach((result) => {
+        if (result.status === 'rejected') console.warn('初始化数据失败', result.reason)
+      })
       invoke('frontend_log', {
-        msg: `bootstrap 明细：数据 ${tData.toFixed(0)}ms · 事件订阅 ${(performance.now() - t0 - tData).toFixed(0)}ms`,
+        msg: `bootstrap 明细：事件订阅 ${tSubscriptions.toFixed(0)}ms · 数据 ${(performance.now() - t0 - tSubscriptions).toFixed(0)}ms`,
       }).catch(() => {})
+      startupFailed.value = !queues.every((queue) => queue.loaded) || unlisteners.size !== subscriptions.length
       ready.value = true
+      if (backgroundStarted || disposed) return
+      backgroundStarted = true
       // 工具检测首次要启动子进程探测版本（约 4s），放后台完成，不阻塞首屏
       void ipc
         .detectTools()
@@ -155,7 +235,12 @@ export const useTaskStore = defineStore('tasks', () => {
         })
         .catch(() => {})
     })()
-    return booting
+    booting = attempt
+    try {
+      await attempt
+    } finally {
+      booting = null
+    }
   }
 
   async function refreshTools() {
@@ -188,9 +273,7 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   async function reload() {
-    downloads.value = await ipc.listDownloads()
-    converts.value = await ipc.listConverts()
-    subtitles.value = await ipc.listSubtitles()
+    await Promise.all(queues.map((queue) => queue.load()))
   }
 
   async function loadTestCatalog() {
@@ -220,6 +303,7 @@ export const useTaskStore = defineStore('tasks', () => {
     testCatalog,
     toolProgress,
     ready,
+    startupFailed,
     activeDownloads,
     activeConverts,
     activeSubtitles,

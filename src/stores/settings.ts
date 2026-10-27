@@ -1,10 +1,19 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { AppSettings, QueueLayout } from '@/types'
 import * as ipc from '@/services/ipc'
-import { tr } from '@/i18n'
 import { normalizeAppearanceStyle, normalizeUiMode } from '@/utils/accent'
 import { normalizeTheme } from '@/services/theme'
+
+const STARTUP_TIMEOUT_MS = 10_000
+
+function startupWait<T>(request: Promise<T>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Settings load timed out')), timeoutMs)
+  })
+  return Promise.race([request, timeout]).finally(() => clearTimeout(timer))
+}
 
 /* ==================== 队列布局（固定 table） ==================== */
 /**
@@ -83,7 +92,29 @@ export const useSettingsStore = defineStore('settings', () => {
   // 首屏即固定详细列表（卡片流已移除，不存在“切页闪一下卡片”的问题）
   const settings = ref<AppSettings>({ ...FALLBACK_SETTINGS, queue_layout: readQueueLayout() })
   const loaded = ref(false)
+  const loadFailed = ref(false)
   const saving = ref(false)
+
+  // 包括 v-model 的直接赋值：即使先改动再改回原值，旧请求也不能覆盖用户选择。
+  type SettingKey = keyof AppSettings
+  const revisions = new Map<SettingKey, number>()
+  let observed = { ...settings.value }
+  watch(settings, (current) => {
+    const keys = new Set([...Object.keys(observed), ...Object.keys(current)] as SettingKey[])
+    keys.forEach((key) => {
+      if (!Object.is(observed[key], current[key])) revisions.set(key, (revisions.get(key) ?? 0) + 1)
+    })
+    observed = { ...current }
+  }, { deep: true, flush: 'sync' })
+
+  function mergeResponse(remote: AppSettings, started: Map<SettingKey, number>) {
+    const unchanged = Object.fromEntries(
+      (Object.keys(remote) as SettingKey[])
+        .filter((key) => (revisions.get(key) ?? 0) === (started.get(key) ?? 0))
+        .map((key) => [key, remote[key]]),
+    )
+    settings.value = { ...settings.value, ...unchanged }
+  }
 
   const isDark = computed(() => settings.value.theme !== 'light')
   /** 当前队列布局：固定 table（保留该计算属性以兼容既有调用方） */
@@ -95,37 +126,73 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 外观风格（1.10）：glass 玻璃拟态（默认） | mono 黑白简约 */
   const appearanceStyle = computed<'glass' | 'mono'>(() => normalizeAppearanceStyle(settings.value.appearance_style))
 
-  async function load() {
-    try {
-      const remote = await ipc.getSettings()
-      // 后端不会回传 queue_layout，用本地镜像补齐（取完设置仍是上次选的布局）
-      settings.value = {
-        ...FALLBACK_SETTINGS,
-        ...remote,
-        // 历史配置里存过的 'system'（跟随系统已移除）静默回退 dark，不报错
-        theme: normalizeTheme(remote.theme),
-        queue_layout: readQueueLayout(),
+  let loading: Promise<AppSettings> | null = null
+  let saveQueue: Promise<unknown> = Promise.resolve()
+  function load() {
+    if (loading) return loading
+    const started = new Map(revisions)
+    const priorSaves = saveQueue
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS
+    const remaining = () => Math.max(0, deadline - Date.now())
+    loadFailed.value = false
+    loading = (async () => {
+      try {
+        await startupWait(priorSaves, remaining())
+        const remote = await startupWait(ipc.getSettings(), remaining())
+        const next = {
+          ...FALLBACK_SETTINGS,
+          ...remote,
+          // 历史配置里的 'system' 静默回退 dark；队列布局由本地兼容层补齐。
+          theme: normalizeTheme(remote.theme),
+          queue_layout: readQueueLayout(),
+        }
+        if (!next.download_dir) {
+          try {
+            next.download_dir = await startupWait(ipc.defaultDownloadDir(), remaining())
+          } catch (e) {
+            loadFailed.value = true
+            console.warn('读取默认下载目录失败', e)
+          }
+        }
+        mergeResponse(next, started)
+      } catch (e) {
+        loadFailed.value = true
+        console.warn('读取设置失败', e)
+      } finally {
+        loaded.value = true
+        loading = null
       }
-      if (!settings.value.download_dir) {
-        settings.value.download_dir = await ipc.defaultDownloadDir()
-      }
-    } catch (e) {
-      console.warn('读取设置失败', e)
-    }
-    loaded.value = true
-    return settings.value
+      return settings.value
+    })()
+    return loading
   }
 
-  async function save() {
+  let pendingSaves = 0
+  function save() {
+    let snapshot = { ...settings.value }
+    let started = new Map(revisions)
+    const priorLoad = loading
+    const layout = queueLayout.value
+    writeQueueLayout(layout)
+    pendingSaves += 1
     saving.value = true
-    try {
-      const layout = queueLayout.value // 保存往返后后端会把该字段丢掉，这里自己补回来
-      writeQueueLayout(layout)
-      settings.value = { ...FALLBACK_SETTINGS, ...(await ipc.saveSettings(settings.value)), queue_layout: layout }
-    } finally {
-      saving.value = false
-    }
-    return settings.value
+    // 后端写入也需串行：仅忽略旧响应仍会让迟到的旧请求覆盖磁盘上的新设置。
+    const request = saveQueue.then(async () => {
+      // 首次读取尚未完成时，先补齐持久化字段，避免把首屏兜底值保存到用户配置。
+      if (priorLoad) {
+        await priorLoad
+        snapshot = { ...settings.value }
+        started = new Map(revisions)
+      }
+      const remote = await ipc.saveSettings(snapshot)
+      mergeResponse({ ...FALLBACK_SETTINGS, ...remote, queue_layout: snapshot.queue_layout ?? DEFAULT_QUEUE_LAYOUT }, started)
+      return settings.value
+    }).finally(() => {
+      pendingSaves -= 1
+      saving.value = pendingSaves > 0
+    })
+    saveQueue = request.catch(() => {})
+    return request
   }
 
   function patch(part: Partial<AppSettings>) {
@@ -148,5 +215,5 @@ export const useSettingsStore = defineStore('settings', () => {
     return queueLayout.value
   }
 
-  return { settings, loaded, saving, isDark, queueLayout, uiMode, isSimple, appearanceStyle, load, save, patch, setQueueLayout }
+  return { settings, loaded, loadFailed, saving, isDark, queueLayout, uiMode, isSimple, appearanceStyle, load, save, patch, setQueueLayout }
 })

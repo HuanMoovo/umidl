@@ -6,13 +6,12 @@
 
 **轻量化、美观、高性能的视频下载 / 格式转换 / AI 字幕桌面客户端**
 
-下载 + 转换 + 字幕，一站式搞定。**Tauri 2 + Rust + Vue 3** 构建，安装包 **4.46 MiB**，全部处理在**本机**完成——不上传、不注册、不埋点。
+下载 + 转换 + 字幕，一站式处理。**Tauri 2 + Rust + Vue 3** 构建；支持本地处理，也可由用户选择云端语音识别服务。
 
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-2f81f7.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3fb950.svg)](#-平台支持)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vuedotjs&logoColor=white)](https://vuejs.org)
-[![Installer size](https://img.shields.io/badge/Installer-4.46%20MiB-brightgreen.svg)](https://github.com/HuanMoovo/umidl/releases)
 [![i18n](https://img.shields.io/badge/i18n-%E4%B8%AD%20%C2%B7%20EN%20%C2%B7%20%E6%97%A5%20%C2%B7%20FR-8957e5.svg)](#界面与主题)
 
 [快速开始](#-快速开始) · [它做什么](#-它做什么) · [功能](#-功能) · [平台支持](#-平台支持) · [参与贡献](CONTRIBUTING.md) · [开源介绍页](https://huanmoovo.github.io/umidl/) · [路线图](docs/ROADMAP.md)
@@ -31,14 +30,14 @@
 
 ## 🎯 它做什么
 
-**在本机把「下载 → 转换 → 字幕」一条链做完**——安装包 4.46 MiB（1.8.11 Windows NSIS 实测）。
+**下载 → 转换 → 字幕**：可选择本地识别，或使用支持的云端语音接口。
 
-| 能力 | 现状（1.8.11；均可从仓库与程序界面核对） |
+| 能力 | 现状（1.10.0） |
 | --- | --- |
-| **本地处理，不上传** | 全流程在本机进程内完成：无账号、无遥测、无云端解析；卸载或删除数据目录即清除全部状态 |
+| **本地处理与云端识别** | 转换和本地字幕在本机处理；选择云端字幕时，音频会上传至选定的服务商，可能产生费用 |
 | **下载** | 两条链路按链接类型自动路由（yt-dlp 站点解析 / aria2c 分段并行）；分 P、合集、HLS/DASH 自动合并；暂停、断点续传、全局限速 |
 | **格式转换** | 80 种目标格式（视频 22 · 音频 20 · 图片 20 · 文档 18），可用性由本机引擎能力探测决定；docx / xlsx / pptx / odt / ods / odp 为纯 Rust 原生解析；支持 NVENC / QSV / AMF 硬件编码 |
-| **字幕** | Whisper.cpp 在本机听写；识别语言为自动检测 + 8 种可多选，可叠加「翻译成英文」轨道；导出 SRT / ASS / VTT / TXT / JSON；模型 6 档按需下载 |
+| **字幕** | 本地 Whisper、SenseVoice、Paraformer，以及多家云端语音识别；导出 SRT / ASS / VTT / TXT / JSON |
 | **插件** | QuickJS 沙箱，硬上限 16 MB 内存 / 512 KB 栈 / 200 ms 单次执行；白名单 API（无 `require` / `process` / `fetch`）；插件按内容寻址校验 sha256 |
 | **跨平台** | 同一份源码可在 Windows / macOS / Linux 构建；各平台产物状态与验证程度见[平台支持](#-平台支持) |
 
@@ -49,7 +48,7 @@
 
 ### Windows（已发布）
 
-1. 到 [Releases](https://github.com/HuanMoovo/umidl/releases) 下载 `Umidl_x.y.z_x64-setup.exe`（1.8.11 安装包 **4.46 MiB**）
+1. 到 [Releases](https://github.com/HuanMoovo/umidl/releases) 选择已发布版本，下载 `Umidl_x.y.z_x64-setup.exe`。
 2. 首次启动会自动检测 yt-dlp / FFmpeg / Whisper 等运行时工具；缺失的在「设置 → 依赖工具」一键下载（装进 `%APPDATA%/umi-downloader/bin`，**不写入系统 PATH**）
 3. 粘贴链接 → 选清晰度 → 开始下载
 
@@ -61,18 +60,20 @@ cd umidl
 npm ci
 
 # Linux 需先装系统依赖（与 CI 一致）
-sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev pkg-config
 
 npm run tauri:dev      # 开发模式（热更新）
-npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
+# 按所在系统选择打包目标（默认配置面向 Windows NSIS）
+npx tauri build --bundles dmg           # macOS
+npx tauri build --bundles deb,appimage  # Linux
 ```
 
-- **CI 产物位置**：Actions → `Release` 工作流 → 对应 run 的 Artifacts（`umidl-windows-x64` / `umidl-macos-arm64` / `umidl-macos-x64` / `umidl-linux-x64`）；四个平台的产物已随 [v1.8.11](https://github.com/HuanMoovo/umidl/releases) 挂到 Releases。Intel macOS 的 dmg 由 arm64 runner 交叉编译产出（命令见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
-- macOS / Linux 目前**只由 CI 编译产出**，尚未在真机做完整回归；aria2 在这两个平台没有官方静态包，安装引导会给出 `brew` / `apt` 指引。
+- [Releases](https://github.com/HuanMoovo/umidl/releases) 提供已成功构建并发布的 Windows、macOS 和 Linux 安装包；具体版本及文件以发布页为准。构建日志和临时产物可在 Actions 的 `Release` 工作流中查看。
+- 1.10.0 的 macOS / Linux 版本需以本次构建结果为准，尚未完成真机回归；macOS 的 Whisper 自动安装暂不支持，需自行提供可用的运行时。aria2 在这两个平台没有官方静态包，安装引导会给出 `brew` / `apt` 指引。
 
 ### 环境要求（源码）
 
-- **Node ≥ 20**、**Rust stable ≥ 1.77**，另需 Python 3（跑 `scripts/` 下的辅助脚本）
+- **Node ≥ 22**、**Rust stable**，另需 Python 3（跑 `scripts/` 下的辅助脚本）
 - Windows：MSVC 生成工具 + WebView2（Win11 自带）；macOS：Xcode Command Line Tools；Linux：见上面的 apt 依赖
 
 完整开发流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
@@ -88,6 +89,8 @@ npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
 | macOS | Intel (x64) | `.dmg` | ✅ **已发布**（1.8.11，9.24 MiB，CI 在 arm64 runner 上交叉编译，未真机回归） |
 | Linux | x64 | `.AppImage` / `.deb` | ✅ **已发布**（1.8.11，deb 6.85 MiB / AppImage 81.4 MiB，CI 构建，未真机回归） |
 | Android | — | — | 🔴 实验性作业，需移动端适配，暂不提供产物 |
+
+上表是历史 1.8.11 的验证记录，并非 1.10.0 的测试结论。新版跨平台产物以对应 [Release](https://github.com/HuanMoovo/umidl/releases) 和构建结果为准；macOS 安装包未配置签名和公证。
 
 ---
 
@@ -162,12 +165,14 @@ npm run tauri:build    # 本地出包：.dmg / .AppImage / .deb
 - 分辨率缩放、CRF 质量预设、提取音频、去除音轨
 - 实时转码进度与取消
 
-### AI 字幕（Whisper.cpp 内核）
-- 视频 → FFmpeg 提取音频 → Whisper 语音识别 → 时间轴 → 导出
+### AI 字幕
+- 视频 → FFmpeg 提取音频 → 本地或云端语音识别 → 时间轴 → 导出
 - 导出格式：SRT / ASS / VTT / TXT / JSON
 - **识别语言可多选（1.6 新增）**：每个选中语言各起一个任务，可叠加"翻译成英文"再生成一份英文轨
-- 自动语言检测，支持中 / 英 / 日 / 韩 / 法 / 德 / 西 / 俄
-- 6 档模型（tiny 75 MB ~ large-v3 3.1 GB），按需下载
+- 本地 Whisper 提供自动语言检测及中 / 英 / 日 / 韩 / 法 / 德 / 西 / 俄选项，6 档模型按需下载。
+- 本地中文识别可选择 SenseVoice 或 Paraformer；模型和独立运行环境按需安装，1.10.0 新增中文模型尚未完成真实语音识别验收。
+- 云端支持 OpenAI、Groq、Fish Audio、Deepgram、AssemblyAI、Azure Speech、腾讯云、百度智能云、讯飞开放平台，也可填写兼容接口。服务商的模型、语言、地区和权限要求不同；百度分句时间戳接口需相应产品权限。
+- 选择云端时音频上传到所选服务商；凭证仅在当前页面会话使用，不写入任务记录。切换服务商或重试时需要重新填写。新增适配已通过模拟接口测试，真实账号与识别效果仍需逐家验证；此前 Groq 的短音频调用通过，Fish Audio 返回余额不足。
 
 ### 内置自动化自检
 设置页「功能自检」可一键跑完整回归：真实调用 yt-dlp / FFmpeg / Whisper 逐项验证下载、转换、字幕、数据层与配置读写。
@@ -317,7 +322,7 @@ python scripts/check_i18n_catalog.py  # 四语言 key 集合一致
 
 本项目以 **GNU Affero General Public License v3.0**（`AGPL-3.0-only`）开源，全文见 [LICENSE](LICENSE)。
 
-一句话理由：Umidl 是纯本地桌面程序，但它带一个可编程插件沙箱——**AGPL 让任何把它包装成网络服务对外提供的人必须交出源码**，而普通用户在自己电脑上使用它不受任何额外限制。
+一句话理由：Umidl 是带可编程插件沙箱的桌面程序——**AGPL 让任何把它包装成网络服务对外提供的人必须交出源码**，而普通用户在自己电脑上使用它不受任何额外限制。
 
 ### 第三方工具声明
 

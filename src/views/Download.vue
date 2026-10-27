@@ -7,11 +7,12 @@
  *    把队列挤到首屏之外）；点开后在同一位置展开，控件与调用一字未改。
  */
 import { useI18n } from 'vue-i18n'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NIcon, NSelect, NSwitch, NSpin, NModal, useMessage, useDialog } from 'naive-ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import {
   CloudDownloadOutline,
   SearchOutline,
@@ -32,7 +33,6 @@ import {
 import TaskTable from '@/components/TaskTable.vue'
 import BatchImportPanel from '@/components/BatchImportPanel.vue'
 import SettingsGroup from '@/components/SettingsGroup.vue'
-import ModeSwitch from '@/components/ModeSwitch.vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useSettingsStore } from '@/stores/settings'
 import { downloader } from '@/services/downloader'
@@ -72,6 +72,29 @@ const submitting = ref(false)
 const busy = ref('')
 const previewOpen = ref(false)
 const subLangs = ref<string[]>([])
+const choosingDir = ref(false)
+let disposed = false
+let probeVersion = 0
+let probedUrl = ''
+const requestBusy = computed(() => submitting.value || !!busy.value)
+
+// A result belongs to one input revision; editing the URL invalidates it immediately.
+watch(url, (next, previous) => {
+  if (next.trim() === previous.trim()) return
+  probeVersion++
+  probedUrl = ''
+  probing.value = false
+  info.value = null
+  error.value = ''
+  selectedFormat.value = null
+  subLangs.value = []
+  previewOpen.value = false
+}, { flush: 'sync' })
+
+onUnmounted(() => {
+  disposed = true
+  probeVersion++
+})
 
 /** 次级入口折叠状态：批量导入（默认收起，保持首屏只有输入 + 队列） */
 const showBatch = ref(false)
@@ -178,31 +201,51 @@ const bestFormatBytes = computed(() => {
 })
 
 async function probe() {
-  if (!looksLikeUrl(url.value)) {
+  if (disposed || probing.value) return
+  const requestUrl = url.value.trim()
+  if (!looksLikeUrl(requestUrl)) {
     message.warning(tr('请输入完整的视频链接'))
     return
   }
   probing.value = true
   error.value = ''
   info.value = null
+  probedUrl = ''
+  const version = ++probeVersion
+  const isCurrent = () => !disposed && version === probeVersion && requestUrl === url.value.trim()
   try {
-    const res = await downloader.probe(url.value)
+    const res = await downloader.probe(requestUrl)
+    if (!isCurrent()) return
     info.value = res
-    selectedFormat.value = formatOptions.value[0]?.value ?? null
+    probedUrl = requestUrl
+    const formats = sortedVideoFormats(res.formats)
+    const preferredHeight = Number(settingsStore.settings.default_quality)
+    const preferred = preferredHeight > 0
+      ? formats.find((format) => {
+          const height = Number(format.resolution.match(/\d+\s*x\s*(\d+)/)?.[1] || format.resolution.match(/^(\d+)p/)?.[1])
+          return height > 0 && height <= preferredHeight
+        }) ?? formats[formats.length - 1]
+      : formats[0]
+    selectedFormat.value = preferred?.format_id ?? null
     // 默认勾选手动字幕，没有则退而选第一条
     const manual = (res.subtitle_tracks || []).filter((t) => !t.auto).map((t) => t.lang)
     subLangs.value = manual.length ? manual : (res.subtitle_tracks || []).slice(0, 1).map((t) => t.lang)
     message.success(tr('解析成功：{title}', { title: res.title }))
   } catch (e: any) {
+    if (!isCurrent()) return
     error.value = String(e?.message ?? e)
     message.error(error.value)
   } finally {
-    probing.value = false
+    if (isCurrent()) probing.value = false
   }
 }
 
 async function start() {
-  if (!url.value.trim()) return
+  if (disposed || requestBusy.value) return
+  if (!info.value || probedUrl !== url.value.trim()) {
+    message.warning(tr('请先解析链接'))
+    return
+  }
   submitting.value = true
   try {
     const t = await downloader.start({
@@ -228,7 +271,8 @@ async function start() {
 
 /** 单独下载：封面 / 字幕 / 音频 / 视频 */
 async function downloadPart(kind: 'thumb' | 'subs' | 'audio' | 'video') {
-  if (!info.value) {
+  if (disposed || requestBusy.value) return
+  if (!info.value || probedUrl !== url.value.trim()) {
     message.warning(tr('请先解析链接'))
     return
   }
@@ -340,6 +384,19 @@ async function openDir() {
   }
 }
 
+async function pickOutputDir() {
+  if (choosingDir.value) return
+  choosingDir.value = true
+  try {
+    const picked = await openDialog({ directory: true, multiple: false, defaultPath: downloadDir.value || undefined })
+    if (!disposed && typeof picked === 'string') outputDir.value = picked
+  } catch (e: any) {
+    if (!disposed) message.error(String(e?.message ?? e))
+  } finally {
+    choosingDir.value = false
+  }
+}
+
 async function clearDone() {
   try {
     await downloader.clear('done')
@@ -350,17 +407,16 @@ async function clearDone() {
   }
 }
 
-watch(mode, (m) => {
-  if (m === 'best') container.value = 'mp4'
-})
-
 onMounted(async () => {
   if (!store.ready) await store.bootstrap()
   else await store.reload() // 每次进入页面重新拉一次，刷新「文件是否还在」等状态
   if (!settingsStore.loaded) await settingsStore.load()
+  if (disposed) return
   const s = settingsStore.settings
   container.value = s.default_container || 'mp4'
   audioFormat.value = s.default_audio_format || 'mp3'
+  if (s.default_quality === 'audio') mode.value = 'audio'
+  else if (['1080', '720', '480'].includes(s.default_quality)) mode.value = 'video'
   const q = route.query.url
   if (typeof q === 'string' && q) {
     url.value = q
@@ -377,7 +433,6 @@ onMounted(async () => {
         <NIcon :size="14" :component="LinkOutline" class="text-accent" />{{ $t('视频链接') }}
         <span class="umi-spacer" />
         <!-- 简单 / 高级模式（与设置页同一状态源）：简单 = 隐藏「高级选项」 -->
-        <ModeSwitch />
       </div>
       <div class="flex gap-2">
         <input
@@ -395,6 +450,16 @@ onMounted(async () => {
             {{ primaryLabel }}
           </span>
         </button>
+      </div>
+
+      <div class="mt-3">
+        <label class="umi-label">{{ $t('输出目录') }}</label>
+        <div class="flex gap-2">
+          <input :value="downloadDir" class="umi-input min-w-0 flex-1" readonly :title="downloadDir" data-test="download-output-path" />
+          <button class="umi-btn umi-btn-sm whitespace-nowrap" :disabled="choosingDir" data-test="download-output-pick" @click="pickOutputDir">
+            <span class="flex items-center gap-1"><NIcon :size="14" :component="FolderOpenOutline" />{{ $t('选择目录') }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- 解析结果 -->
@@ -451,9 +516,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- 高级选项（1.10）：每任务参数默认折叠；简单模式下整体不渲染 -->
-        <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3">
-        <div class="grid grid-cols-2 gap-3">
+        <div class="mt-3 grid grid-cols-2 gap-3">
           <div>
             <label class="umi-label">{{ $t('下载模式') }}</label>
             <div class="flex gap-1.5">
@@ -489,6 +552,8 @@ onMounted(async () => {
             />
           </div>
         </div>
+        <!-- Less common embedding options stay in the advanced group. -->
+        <SettingsGroup :title="$t('高级选项')" :icon="OptionsOutline" class="mt-3" always>
         <!-- 每任务开关（原底部一行，随参数收进同一折叠区组） -->
         <div class="mt-3 flex flex-wrap items-center gap-4">
           <label class="s-text-2 flex cursor-pointer items-center gap-2 text-[12px]">
@@ -502,17 +567,17 @@ onMounted(async () => {
         <div class="mt-3">
           <div class="s-text-2 mb-1.5 text-[12px] font-medium">{{ $t('单独下载') }}</div>
           <div class="grid grid-cols-4 gap-2">
-            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="busy === 'video'" @click="downloadPart('video')">
+            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="requestBusy" @click="downloadPart('video')">
               <NIcon :size="16" :component="FilmOutline" class="text-accent" />
               <span class="text-[11px]">{{ $t('仅视频') }}</span>
               <span class="s-text-3 text-[10px]">{{ mode === 'best' ? $t('最佳画质') : $t('所选清晰度') }}</span>
             </button>
-            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="busy === 'audio'" @click="downloadPart('audio')">
+            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="requestBusy" data-test="download-part-audio" @click="downloadPart('audio')">
               <NIcon :size="16" :component="MusicalNotesOutline" class="text-cyan-600 dark:text-cyan-400" />
               <span class="text-[11px]">{{ $t('仅音频') }}</span>
               <span class="s-text-3 text-[10px]">{{ audioFormat.toUpperCase() }}</span>
             </button>
-            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="busy === 'thumb'" @click="downloadPart('thumb')">
+            <button class="umi-btn flex flex-col items-center gap-0.5 !py-2" :disabled="requestBusy" @click="downloadPart('thumb')">
               <NIcon :size="16" :component="ImageOutline" class="text-pink-600 dark:text-pink-400" />
               <span class="text-[11px]">{{ $t('仅封面') }}</span>
               <span class="s-text-3 text-[10px]">
@@ -521,7 +586,7 @@ onMounted(async () => {
             </button>
             <button
               class="umi-btn flex flex-col items-center gap-0.5 !py-2"
-              :disabled="busy === 'subs' || !info.subtitle_tracks.length"
+              :disabled="requestBusy || !info.subtitle_tracks.length"
               @click="downloadPart('subs')"
             >
               <NIcon :size="16" :component="TextOutline" class="text-emerald-600 dark:text-emerald-400" />
@@ -546,7 +611,7 @@ onMounted(async () => {
         </div>
 
         <div class="mt-3 flex flex-wrap items-center justify-end gap-3">
-          <button class="umi-btn-primary" :disabled="submitting" data-test="link-start" @click="start">
+          <button class="umi-btn-primary" :disabled="requestBusy" data-test="link-start" @click="start">
             <span class="flex items-center gap-1.5">
               <NIcon :size="14" :component="CloudDownloadOutline" />{{ $t('开始下载') }}</span>
           </button>

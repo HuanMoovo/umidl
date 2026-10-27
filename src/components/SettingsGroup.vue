@@ -20,6 +20,8 @@ const props = defineProps<{
   open?: boolean
   /** 轻量样式：内容本身是卡片时不套外框 */
   bare?: boolean
+  /** Allow a local one-click disclosure even when the global UI mode is simple. */
+  always?: boolean
 }>()
 
 const settingsStore = useSettingsStore()
@@ -27,7 +29,7 @@ const expanded = ref(!!props.open)
 </script>
 
 <template>
-  <div v-if="!settingsStore.isSimple" class="umi-group" :class="bare ? 'umi-group-bare' : ''">
+  <div v-if="always || !settingsStore.isSimple" class="umi-group" :class="bare ? 'umi-group-bare' : ''">
     <button
       type="button"
       class="umi-group-head"

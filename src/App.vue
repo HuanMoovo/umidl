@@ -20,6 +20,7 @@ import {
 import { syncWindowTheme } from '@/services/windowTheme'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import { invoke } from '@tauri-apps/api/core'
+import { isTauri } from '@/services/ipc'
 
 /** 启动性能埋点：耗时写入后端 stderr（[umi][fe] 前缀） */
 const flog = (m: string) => {
@@ -28,8 +29,24 @@ const flog = (m: string) => {
 
 const taskStore = useTaskStore()
 const settingsStore = useSettingsStore()
+const desktopRuntime = isTauri()
 const booted = ref(false)
+const retryingStartup = ref(false)
+const startupFailed = computed(() => taskStore.startupFailed || settingsStore.loadFailed)
 const resolved = ref<'dark' | 'light'>('dark')
+
+async function retryStartup() {
+  if (retryingStartup.value) return
+  retryingStartup.value = true
+  try {
+    await Promise.all([
+      settingsStore.loadFailed ? settingsStore.load() : Promise.resolve(),
+      taskStore.bootstrap(),
+    ])
+  } finally {
+    retryingStartup.value = false
+  }
+}
 
 const themeOverrides = computed<GlobalThemeOverrides>(
   () =>
@@ -72,6 +89,12 @@ function syncCustomAccent() {
 // 系统昼夜变化时不再跟随时段切换（「跟随系统」已移除）
 
 onMounted(async () => {
+  if (!desktopRuntime) {
+    settingsStore.loaded = true
+    taskStore.ready = true
+    booted.value = true
+    return
+  }
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
   if (nav) flog(`WebView 首字节 ${nav.responseStart.toFixed(0)}ms · DOM 就绪 ${nav.domContentLoadedEventEnd.toFixed(0)}ms`)
   flog('Vue 挂载完成，开始加载设置')
@@ -138,7 +161,7 @@ watch(
       <NDialogProvider>
         <div class="relative h-screen w-screen overflow-hidden">
           <ParticleBg
-            :enabled="settingsStore.settings.animation !== false && settingsStore.appearanceStyle !== 'mono'"
+            :enabled="!settingsStore.isSimple && settingsStore.settings.animation !== false && settingsStore.appearanceStyle !== 'mono'"
             :quality="settingsStore.settings.animation_quality || 'medium'"
             :shape="settingsStore.settings?.particle_shape ?? 'circle'"
           />
@@ -146,7 +169,23 @@ watch(
             <SideBar />
             <div class="flex min-w-0 flex-1 flex-col">
               <TitleBar />
-              <main class="flex-1 overflow-y-auto px-6 pb-8 pt-4">
+              <main class="min-w-0 flex-1 overflow-y-auto px-3 pb-8 pt-4 sm:px-6">
+                <p v-if="!desktopRuntime" class="umi-hint mb-3" data-test="browser-preview">{{ $t('浏览器界面预览，文件处理请使用桌面客户端。') }}</p>
+                <div
+                  v-if="booted && startupFailed"
+                  class="mb-4 flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm"
+                  style="border-color: var(--umi-border); background: var(--umi-sunken)"
+                  role="status"
+                  data-test="startup-recovery"
+                >
+                  <span class="s-text-2">{{ $t('部分启动数据未能加载，已有任务仍可继续使用。') }}</span>
+                  <button
+                    class="umi-btn umi-btn-sm shrink-0"
+                    :disabled="retryingStartup"
+                    data-test="startup-retry"
+                    @click="retryStartup"
+                  >{{ retryingStartup ? $t('正在重试…') : $t('重试加载') }}</button>
+                </div>
                 <RouterView v-slot="{ Component }">
                   <Transition name="fade" mode="out-in">
                     <component :is="Component" :key="$route.path" />

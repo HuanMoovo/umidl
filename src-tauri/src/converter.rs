@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::mpsc;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use regex::Regex;
@@ -49,12 +49,22 @@ pub fn output_path_for(input: &Path, out_dir: &Path, format: &str) -> PathBuf {
                 return c;
             }
             i += 1;
-            if i > 999 {
-                return c;
-            }
         }
     }
     candidate
+}
+
+/// Claim the name before launching a worker so simultaneous jobs cannot overwrite one another.
+pub fn reserve_output_path(input: &Path, out_dir: &Path, format: &str) -> std::io::Result<PathBuf> {
+    for _ in 0..10_000 {
+        let path = output_path_for(input, out_dir, format);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "没有可用的输出文件名，请更换输出目录"))
 }
 
 /// 编解码器别名归一化：hevc/H.265/x265 → 真实编码器名
@@ -299,6 +309,8 @@ pub fn is_image_path(p: &str) -> bool {
 
 /// 构建 FFmpeg 参数（纯函数，可单测）
 pub fn build_ffmpeg_args(req: &ConvertRequest, output: &Path) -> Vec<String> {
+    let normalized = normalize_request(req);
+    let req = &normalized;
     let mut a: Vec<String> = vec!["-hide_banner".into(), "-nostdin".into(), "-y".into()];
 
     // 硬件解码（可选）
@@ -344,7 +356,7 @@ pub fn build_ffmpeg_args(req: &ConvertRequest, output: &Path) -> Vec<String> {
         }
         if let Some((_, codec, scale)) = IMAGE_OUT_SPECIAL.iter().find(|(id, _, _)| *id == fmt_l).copied() {
             a.push("-f".into());
-            a.push("image2".into());
+            a.push(if fmt_l == "ico" { "ico" } else { "image2" }.into());
             a.push("-c:v".into());
             a.push(codec.into());
             if let Some(f) = scale {
@@ -505,6 +517,38 @@ pub fn build_ffmpeg_args(req: &ConvertRequest, output: &Path) -> Vec<String> {
 
     a.push(output.to_string_lossy().to_string());
     a
+}
+
+pub fn normalize_request(req: &ConvertRequest) -> ConvertRequest {
+    let mut req = req.clone();
+    let speed = req.speed.map(|s| s > 0.0 && (s - 1.0).abs() > 0.0001).unwrap_or(false);
+    let video_changed = speed || req.fps.unwrap_or(0) > 0
+        || req.bitrate.as_deref().map(|b| !b.is_empty() && b != "auto").unwrap_or(false)
+        || req.resolution.as_deref().map(|r| !r.is_empty() && r != "原分辨率").unwrap_or(false);
+    let audio_changed = speed || req.sample_rate.unwrap_or(0) > 0 || req.channels.unwrap_or(0) > 0
+        || req.audio_bitrate.as_deref().map(|b| !b.is_empty() && b != "auto").unwrap_or(false);
+    let (video, audio) = match req.format.to_ascii_lowercase().as_str() {
+        "webm" => ("libvpx-vp9", "libopus"),
+        "ogv" => ("libtheora", "libvorbis"),
+        "wmv" | "asf" => ("wmv2", "wmav2"),
+        "mpg" | "vob" | "m2v" => ("mpeg2video", "mp2"),
+        "avi" => ("libx264", "libmp3lame"),
+        "mp3" => ("none", "libmp3lame"),
+        "flac" => ("none", "flac"),
+        "wav" => ("none", "pcm_s16le"),
+        "aiff" => ("none", "pcm_s16be"),
+        "opus" => ("none", "libopus"),
+        "ogg" => ("none", "libvorbis"),
+        _ => ("libx264", "aac"),
+    };
+    if video_changed && req.video_codec.as_deref() == Some("copy") {
+        req.video_codec = Some(video.into());
+    }
+    if audio_changed && req.audio_codec.as_deref() == Some("copy") {
+        req.audio_codec = Some(audio.into());
+    }
+    if video_changed || audio_changed { req.auto_format = None; }
+    req
 }
 
 /* ==================== ffprobe ==================== */
@@ -1125,17 +1169,51 @@ fn probe_media_caps(ctx: &Ctx) -> MediaCaps {
     caps
 }
 
-/// 进程内缓存的能力快照（探测成功才缓存；失败下次再试）
+#[derive(Default)]
+struct CatalogCache {
+    fingerprint: String,
+    snapshot: Option<MediaCaps>,
+}
+
+impl CatalogCache {
+    fn get_or_probe(&mut self, fingerprint: String, probe: impl FnOnce() -> MediaCaps) -> MediaCaps {
+        if self.fingerprint == fingerprint {
+            if let Some(caps) = &self.snapshot { return caps.clone(); }
+        }
+        let caps = probe();
+        self.fingerprint = fingerprint;
+        self.snapshot = Some(caps.clone());
+        caps
+    }
+    fn invalidate(&mut self) { self.snapshot = None; }
+}
+
+fn catalog_cache() -> &'static Mutex<CatalogCache> {
+    static CACHE: OnceLock<Mutex<CatalogCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(CatalogCache::default()))
+}
+
+pub fn invalidate_catalog_cache() {
+    if let Ok(mut cache) = catalog_cache().lock() { cache.invalidate(); }
+}
+
 fn caps_cached(ctx: &Ctx) -> MediaCaps {
-    static CAPS: OnceLock<MediaCaps> = OnceLock::new();
-    if let Some(c) = CAPS.get() {
-        return c.clone();
+    let engines = crate::docs::capabilities(ctx);
+    let mut paths = vec![ffmpeg_bin(ctx), magick_bin(ctx)];
+    for key in ["pandoc_path", "poppler_path"] {
+        paths.push(engines[key].as_str().map(PathBuf::from));
     }
-    let caps = probe_media_caps(ctx);
-    if caps.ffmpeg {
-        let _ = CAPS.set(caps.clone());
+    let mut fingerprint = ctx.dirs.bin.to_string_lossy().into_owned();
+    for path in paths {
+        if let Some(path) = path {
+            let meta = path.metadata().ok();
+            fingerprint.push_str(&format!("|{}:{:?}:{:?}", path.display(), meta.as_ref().map(|m| m.len()), meta.and_then(|m| m.modified().ok())));
+        }
     }
-    caps
+    match catalog_cache().lock() {
+        Ok(mut cache) => cache.get_or_probe(fingerprint, || probe_media_caps(ctx)),
+        Err(_) => probe_media_caps(ctx),
+    }
 }
 
 /* ---- 目录组装（纯函数，可单测） ---- */
@@ -1259,6 +1337,161 @@ pub fn build_catalog(caps: &MediaCaps) -> serde_json::Value {
 /// 转换格式目录：按 视频 / 音频 / 图片 / 文档 分组，`available` 取自本机真实引擎能力
 pub fn convert_formats(ctx: &Ctx) -> serde_json::Value {
     build_catalog(&caps_cached(ctx))
+}
+
+/// The source-specific catalog describes actual conversion routes, not readable inputs.
+pub fn build_catalog_for_input(caps: &MediaCaps, input: &str) -> serde_json::Value {
+    use crate::docs::Route;
+    let mut catalog = build_catalog(caps);
+    let document = crate::docs::is_document_path(input);
+    let image = is_image_path(input);
+    let ext = Path::new(input).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let audio = AUDIO_FORMATS.iter().any(|f| f.id == ext) || matches!(ext.as_str(), "aif" | "caf");
+    let mut total = 0;
+    for group in catalog["groups"].as_array_mut().unwrap() {
+        let gid = group["id"].as_str().unwrap_or("").to_string();
+        let mut count = 0;
+        for format in group["formats"].as_array_mut().unwrap() {
+            let id = format["id"].as_str().unwrap_or("").to_string();
+            let available = if document {
+                let normalized = crate::docs::normalize_target(&id);
+                let engine = match crate::docs::route_for(Path::new(input), &id) {
+                    Route::Native => Some("native"),
+                    Route::PopplerPdf if caps.poppler => Some("poppler"),
+                    Route::Pandoc if caps.pandoc && [
+                        "md", "html", "txt", "docx", "odt", "rtf", "epub", "pptx", "tex",
+                        "rst", "org", "json", "opml", "mediawiki", "asciidoc"
+                    ].contains(&normalized.as_str()) => Some("pandoc"),
+                    _ => None,
+                };
+                if let Some(engine) = engine {
+                    format["engines"] = serde_json::json!([engine]);
+                }
+                engine.is_some()
+            } else if image && magick_input_ext(input).is_some() && (caps.magick || matches!(ext.as_str(), "heic" | "heif")) {
+                let target = match id.as_str() { "jpg" | "jpeg" => "JPEG".into(), "tif" | "tiff" => "TIFF".into(), other => other.to_ascii_uppercase() };
+                let source_ok = magick_input_format(&ext).map(|m| caps.magick_can_read(m)).unwrap_or(false);
+                let ok = gid == "image" && source_ok && caps.magick_can_write(&target);
+                if ok { format["engines"] = serde_json::json!(["imagemagick"]); }
+                ok
+            } else {
+                let group_ok = if image { gid == "image" } else if audio { gid == "audio" }
+                    else { gid != "document" && !(gid == "image" && id == "gif") };
+                group_ok && format["available"].as_bool().unwrap_or(false)
+            };
+            format["available"] = serde_json::json!(available);
+            if available { count += 1; }
+        }
+        group["count"] = serde_json::json!(count);
+        total += count;
+    }
+    catalog["total"] = serde_json::json!(total);
+    catalog
+}
+
+pub fn convert_targets(ctx: &Ctx, input: &str) -> serde_json::Value {
+    build_catalog_for_input(&caps_cached(ctx), input)
+}
+
+#[cfg(test)]
+mod source_target_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_video_bitrate_disables_stream_copy() {
+        let req = ConvertRequest { input_file: "movie.mp4".into(), video_codec: Some("copy".into()),
+            bitrate: Some("2M".into()), ..ConvertRequest::default() };
+        let args = build_ffmpeg_args(&req, Path::new("out.mp4"));
+        assert!(args.windows(2).any(|p| p[0] == "-c:v" && p[1] == "libx264"));
+        assert!(args.windows(2).any(|p| p[0] == "-b:v" && p[1] == "2M"));
+    }
+
+    #[test]
+    fn magick_source_targets_use_its_read_and_write_capabilities() {
+        let mut caps = MediaCaps { magick: true, ..MediaCaps::default() };
+        caps.magick_formats.insert("HEIC".into(), "r--".into());
+        caps.magick_formats.insert("PNG".into(), "rw-".into());
+        let ids = available_ids(&build_catalog_for_input(&caps, "photo.heic"));
+        assert!(ids.contains(&"png".into()), "Magick can write PNG without FFmpeg");
+        assert!(!ids.contains(&"jpg".into()), "Magick cannot write JPEG in this fixture");
+    }
+
+    #[test]
+    fn capability_cache_reprobes_changed_tools_and_explicit_refreshes() {
+        let mut cache = CatalogCache::default();
+        let mut probes = 0;
+        cache.get_or_probe("first".into(), || { probes += 1; MediaCaps::default() });
+        cache.get_or_probe("first".into(), || { probes += 1; MediaCaps::default() });
+        assert_eq!(probes, 1);
+        let next = cache.get_or_probe("new tool".into(), || { probes += 1; MediaCaps { poppler: true, ..MediaCaps::default() } });
+        assert!(next.poppler);
+        cache.invalidate();
+        cache.get_or_probe("new tool".into(), || { probes += 1; MediaCaps::default() });
+        assert_eq!(probes, 3);
+    }
+
+    fn available_ids(catalog: &serde_json::Value) -> Vec<String> {
+        catalog["groups"].as_array().unwrap().iter()
+            .flat_map(|g| g["formats"].as_array().unwrap())
+            .filter(|f| f["available"] == true)
+            .map(|f| f["id"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn spreadsheet_targets_are_native_outputs_not_other_office_inputs() {
+        let ids = available_ids(&build_catalog_for_input(&MediaCaps::default(), "table.xlsx"));
+        assert!(ids.contains(&"csv".into()));
+        assert!(ids.contains(&"html".into()));
+        assert!(!ids.contains(&"docx".into()));
+        assert!(!ids.contains(&"xlsx".into()));
+        assert!(!ids.contains(&"mp4".into()));
+    }
+
+    #[test]
+    fn pdf_image_output_uses_poppler_without_ffmpeg() {
+        let caps = MediaCaps { poppler: true, ..MediaCaps::default() };
+        let ids = available_ids(&build_catalog_for_input(&caps, "paper.PDF"));
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"png".into()));
+        assert!(ids.contains(&"txt".into()));
+    }
+
+    #[test]
+    fn pandoc_does_not_offer_read_only_formats_or_a_csv_writer() {
+        let caps = MediaCaps { pandoc: true, ..MediaCaps::default() };
+        let ids = available_ids(&build_catalog_for_input(&caps, "paper.docx"));
+        assert!(ids.contains(&"epub".into()));
+        for unsupported in ["xlsx", "ods", "csv", "pdf", "tsv"] {
+            assert!(!ids.iter().any(|id| id == unsupported), "{unsupported}");
+        }
+    }
+
+    #[test]
+    fn scaled_or_retimed_copy_streams_are_reencoded() {
+        let req = ConvertRequest {
+            input_file: "movie.mp4".into(),
+            video_codec: Some("copy".into()), audio_codec: Some("copy".into()),
+            resolution: Some("1280x720".into()), speed: Some(1.5),
+            ..ConvertRequest::default()
+        };
+        let args = build_ffmpeg_args(&req, Path::new("out.mp4"));
+        assert!(!args.windows(2).any(|pair| pair[0] == "-c:v" && pair[1] == "copy"));
+        assert!(!args.windows(2).any(|pair| pair[0] == "-c:a" && pair[1] == "copy"));
+        assert!(args.iter().any(|arg| arg.contains("scale=1280:720")));
+    }
+
+    #[test]
+    fn concurrent_output_names_are_reserved_before_jobs_start() {
+        let dir = std::env::temp_dir().join(format!("umi-reserve-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        std::fs::write(&source, b"original").unwrap();
+        let a = reserve_output_path(&source, &dir, "mkv").unwrap();
+        let b = reserve_output_path(&source, &dir, "mkv").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(std::fs::read(&source).unwrap(), b"original");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -1864,7 +2097,16 @@ pub struct ConvertOutcome {
 ///
 /// magick 按输出扩展名挑编码器，所以不需要 `-f`；`-strip` 对应「清除元数据」。
 pub fn build_magick_args(req: &ConvertRequest, output: &Path) -> Vec<String> {
-    let mut a: Vec<String> = vec![req.input_file.clone()];
+    // PSD can contain a composite plus layers; HEIC/HEIF can contain several images.
+    // Single-image targets must replace the reserved path, not create numbered siblings.
+    let input = if magick_input_ext(&req.input_file).is_some()
+        && !req.format.trim().eq_ignore_ascii_case("psd")
+    {
+        format!("{}[0]", req.input_file)
+    } else {
+        req.input_file.clone()
+    };
+    let mut a: Vec<String> = vec![input];
     if req.remove_metadata {
         a.push("-strip".into());
     }
@@ -1903,7 +2145,10 @@ where
         .output()
         .map_err(|e| anyhow::anyhow!("启动 ImageMagick 失败：{e}"))?;
     let err = crate::ctx::decode_output(&out.stderr);
-    if !out.status.success() || !output.is_file() {
+    let has_output = std::fs::metadata(output)
+        .map(|meta| meta.is_file() && meta.len() > 0)
+        .unwrap_or(false);
+    if !out.status.success() || !has_output {
         anyhow::bail!("{}", last_error_line(&err, "ImageMagick 转换失败"));
     }
     on_tick(ConvertTick {
@@ -2262,6 +2507,7 @@ mod tests {
             ..Default::default()
         };
         let a = build_ffmpeg_args(&req, Path::new("out.ico"));
+        assert!(a.windows(2).any(|pair| pair[0] == "-f" && pair[1] == "ico"), "ICO must use a real icon container, not a BMP image2 payload");
         assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "bmp"), "{a:?}");
         let vf = a.windows(2).find(|w| w[0] == "-vf").map(|w| w[1].clone());
         assert!(vf.unwrap_or_default().contains("256"), "必须缩到 ≤256：{a:?}");
@@ -2599,5 +2845,103 @@ mod tests {
         // 文件不存在
         let err = probe_media(&ctx, &dir.join("nope.docx").to_string_lossy()).unwrap_err().to_string();
         assert!(err.contains("文件不存在"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod magick_single_image_tests {
+    use super::*;
+
+    #[test]
+    fn single_image_targets_select_the_composite_from_special_inputs() {
+        for input in ["D:/images/layered.PSD", "D:/images/photo.HEIC", "D:/images/photo.heif"] {
+            let req = ConvertRequest {
+                input_file: input.into(),
+                format: "png".into(),
+                ..Default::default()
+            };
+            assert_eq!(
+                build_magick_args(&req, Path::new("D:/output/image.png")),
+                vec![format!("{input}[0]"), "D:/output/image.png".into()],
+                "single-image output must not turn into numbered layer files"
+            );
+        }
+    }
+
+    #[test]
+    fn psd_targets_keep_the_source_layers() {
+        let req = ConvertRequest {
+            input_file: "D:/images/layered.psd".into(),
+            format: "PSD".into(),
+            remove_metadata: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            build_magick_args(&req, Path::new("D:/output/layered.psd")),
+            vec!["D:/images/layered.psd", "-strip", "D:/output/layered.psd"],
+            "writing another PSD must retain the layers rather than select only the composite"
+        );
+    }
+
+    fn smoke_context(tag: &str) -> (Ctx, PathBuf) {
+        let root = PathBuf::from(std::env::var_os("UMI_MAGICK_SMOKE_DIR")
+            .expect("set UMI_MAGICK_SMOKE_DIR to an isolated local output directory"));
+        let dir = root.join(format!("{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = PathBuf::from(std::env::var_os("APPDATA").expect("APPDATA"))
+            .join("umi-downloader").join("bin");
+        let dirs = crate::ctx::AppDirs {
+            data: dir.clone(), bin, models: dir.join("models"), cache: dir.join("cache"),
+            downloads: dir.clone(), db_file: dir.join("unused.db"), settings_file: dir.join("unused.json"),
+        };
+        (Ctx::new(dirs, crate::ctx::ToolPaths::default(), crate::models::AppSettings::default()), dir)
+    }
+
+    #[test]
+    #[ignore = "local ImageMagick smoke test; requires UMI_MAGICK_SMOKE_DIR and the existing read-only PSD fixture"]
+    fn real_layered_psd_replaces_the_reserved_output_with_one_png() {
+        let (ctx, dir) = smoke_context("layered-psd");
+        let input = PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("umi-downloader").join("convproof").join("psd").join("素材.psd");
+        assert!(input.is_file(), "existing fixture missing: {}", input.display());
+        let output = reserve_output_path(&input, &dir, "png").unwrap();
+        assert_eq!(std::fs::metadata(&output).unwrap().len(), 0);
+        let req = ConvertRequest {
+            input_file: input.to_string_lossy().into(), format: "png".into(), ..Default::default()
+        };
+        let mut ticks = Vec::new();
+        let result = run_magick_convert(&ctx, &req, &output, |tick| ticks.push(tick)).unwrap();
+        assert_eq!(result.exit_code, 0);
+        let bytes = std::fs::read(&output).unwrap();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "conversion reported success for an empty/non-PNG reservation: {} bytes", bytes.len());
+        assert!(ticks.last().unwrap().done);
+        let png_count = std::fs::read_dir(&dir).unwrap().flatten()
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("png")).count();
+        assert_eq!(png_count, 1, "layers must not escape as numbered PNG files");
+        eprintln!("[single-image proof] {}: {} bytes", output.display(), bytes.len());
+    }
+
+    #[test]
+    #[ignore = "local child-process output-contract smoke test; requires UMI_MAGICK_SMOKE_DIR"]
+    fn successful_engine_exit_cannot_mark_an_empty_reservation_done() {
+        let (mut ctx, dir) = smoke_context("empty-reservation");
+        let output = reserve_output_path(Path::new("no-output.psd"), &dir, "png").unwrap();
+        // Use a real successful child process that produces no output, standing in
+        // for an engine that exits without replacing the pre-existing reservation.
+        ctx.dirs.bin = dir.join("no-op-engine");
+        let engine_dir = ctx.dirs.bin.join("imagemagick");
+        std::fs::create_dir_all(&engine_dir).unwrap();
+        let engine = engine_dir.join(if cfg!(windows) { "magick.exe" } else { "magick" });
+        std::fs::copy(std::env::current_exe().unwrap(), &engine).unwrap();
+        // The test harness lists tests matching the output path, then exits zero.
+        // --list cannot execute tests recursively and never writes the image path.
+        let req = ConvertRequest { input_file: "--list".into(), format: "png".into(), ..Default::default() };
+        let probe = command_for(&engine).args(build_magick_args(&req, &output)).output().unwrap();
+        assert!(probe.status.success(), "test process must exit successfully before checking the output contract");
+        let mut ticks = Vec::new();
+        let result = run_magick_convert(&ctx, &req, &output, |tick| ticks.push(tick));
+        assert!(result.is_err(), "successful process exit accepted a zero-byte reserved path");
+        assert_eq!(std::fs::metadata(&output).unwrap().len(), 0);
+        assert!(!ticks.iter().any(|tick| tick.done), "empty output must never emit completion");
     }
 }

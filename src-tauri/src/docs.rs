@@ -1996,7 +1996,7 @@ fn poppler_convert(ctx: &Ctx, src: &Path, out: &Path, target: &str) -> Result<Ve
 /// pdftoppm 输出 `前缀-N.png`：单页直接改名为目标文件；
 /// 多页时第 1 页命名为目标文件，其余保留 `前缀-2.png`、`前缀-3.png` …（不丢页）
 fn finalize_pdf_png(out: &Path, program: &Path, args: &[String]) -> Result<()> {
-    if out.is_file() {
+    if out.metadata().map(|m| m.is_file() && m.len() > 0).unwrap_or(false) {
         return Ok(());
     }
     let dir = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
@@ -2020,6 +2020,25 @@ fn finalize_pdf_png(out: &Path, program: &Path, args: &[String]) -> Result<()> {
     std::fs::rename(&pages[0].1, out)
         .with_context(|| format!("重命名 PDF 首页图片失败：{}", pages[0].1.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod reserved_pdf_output_test {
+    use super::*;
+
+    #[test]
+    fn pdf_first_page_replaces_the_empty_reserved_output() {
+        let dir = std::env::temp_dir().join(format!("umi-pdf-reserved-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("paper.png");
+        std::fs::write(&out, b"").unwrap();
+        std::fs::write(dir.join("paper-1.png"), b"first page").unwrap();
+        std::fs::write(dir.join("paper-2.png"), b"second page").unwrap();
+        finalize_pdf_png(&out, Path::new("pdftoppm"), &[]).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"first page");
+        assert_eq!(std::fs::read(dir.join("paper-2.png")).unwrap(), b"second page");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 fn check_output(out: &Path, program: &Path, args: &[String]) -> Result<()> {

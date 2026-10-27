@@ -35,9 +35,9 @@ const badges = computed<Record<string, number>>(() => ({
 </script>
 
 <template>
-  <aside class="w-[188px] shrink-0 border-r s-border-soft s-surface-2 backdrop-blur-xl">
+  <aside class="w-16 shrink-0 border-r s-border-soft s-surface-2 backdrop-blur-xl lg:w-[188px]">
     <div class="flex h-full flex-col">
-      <div class="flex items-center gap-2.5 px-5 pb-5 pt-6 select-none">
+      <div class="flex items-center gap-2.5 px-3 pb-5 pt-6 select-none lg:px-5">
         <div class="relative">
           <div class="absolute inset-0 rounded-xl bg-umi-500/60 blur-md" />
           <img
@@ -47,7 +47,7 @@ const badges = computed<Record<string, number>>(() => ({
             draggable="false"
           />
         </div>
-        <div class="leading-tight">
+        <div class="hidden leading-tight lg:block">
           <div class="text-[13px] font-bold tracking-wide s-text">Umidl</div>
           <div class="text-[10px] tracking-[0.18em] s-text-3">DOWNLOADER</div>
         </div>
@@ -58,7 +58,9 @@ const badges = computed<Record<string, number>>(() => ({
           v-for="it in items"
           :key="it.key"
           :to="it.to"
-          class="group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200"
+          :aria-label="it.label"
+          :title="it.label"
+          class="group relative flex items-center justify-center gap-3 rounded-xl px-2 py-2.5 text-sm transition-all duration-200 lg:justify-start lg:px-3"
           :class="
             route.path === it.to
               ? 'umi-nav-active bg-gradient-to-r from-umi-600/35 to-transparent s-text shadow-[inset_0_0_0_1px_rgba(124,77,255,0.35)]'
@@ -70,10 +72,10 @@ const badges = computed<Record<string, number>>(() => ({
             class="umi-nav-bar absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-gradient-to-b from-umi-400 to-accent-cyan shadow-glow"
           />
           <NIcon :size="18" :component="it.icon" :class="route.path === it.to ? 'text-accent' : ''" />
-          <span class="font-medium">{{ it.label }}</span>
+          <span class="hidden font-medium lg:inline">{{ it.label }}</span>
           <span
             v-if="badges[it.key]"
-            class="ml-auto rounded-full bg-umi-500 px-1.5 py-px text-[10px] font-bold leading-tight text-white"
+            class="absolute right-0 top-0 rounded-full bg-umi-500 px-1.5 py-px text-[10px] font-bold leading-tight text-white lg:static lg:ml-auto"
           >
             {{ badges[it.key] }}
           </span>

@@ -20,14 +20,12 @@ import {
   AlertCircleOutline,
   CheckmarkCircleOutline,
   CloudDownloadOutline,
-  CubeOutline,
   ExtensionPuzzleOutline,
   ListOutline,
   RefreshOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { isTauri } from '@/services/ipc'
-import { useTaskStore } from '@/stores/tasks'
 import {
   onPluginEvent,
   onPluginInstalled,
@@ -46,44 +44,65 @@ import {
 
 const { t: tr } = useI18n()
 const message = useMessage()
-const store = useTaskStore()
 
 /** 运行在 Tauri 容器内？（浏览器预览时 IPC 一律不可用） */
-const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const inTauri = isTauri()
 
 const sandbox = ref<PluginSandboxInfo | null>(null)
 const installed = ref<PluginInfo[]>([])
 const loading = ref(false)
-const busy = ref('')
+const pending = ref(new Map<string, 'uninstall' | 'toggle' | 'test'>())
 const testResults = ref<Record<string, PluginTestResult>>({})
-const error = ref('')
+const sandboxError = ref('')
+const listError = ref('')
+const subscriptionError = ref('')
+const error = computed(() => [sandboxError.value, listError.value, subscriptionError.value].filter(Boolean).join('\n'))
+const search = ref('')
+const statusFilter = ref('all')
+const filteredPlugins = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  return installed.value.filter((plugin) => {
+    if (statusFilter.value === 'enabled' && !plugin.enabled) return false
+    if (statusFilter.value === 'disabled' && plugin.enabled) return false
+    return !query || [plugin.name, plugin.id, plugin.description, plugin.source]
+      .some((value) => (value || '').toLowerCase().includes(query))
+  })
+})
+let disposed = false
+let listRequest = 0
 
 /* ------------------------- 数据加载 ------------------------- */
 async function refreshAll(silent = false) {
+  if (loading.value) return
   if (!inTauri) {
     if (!silent) message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
   loading.value = true
-  error.value = ''
   try {
-    const [s, list] = await Promise.all([pluginSandboxInfo(), pluginList()])
-    sandbox.value = s
-    installed.value = Array.isArray(list) ? list : []
-  } catch (e: any) {
-    error.value = String(e?.message ?? e)
-    if (!silent) message.error(error.value)
+    const [probe] = await Promise.allSettled([pluginSandboxInfo(), reloadInstalled()])
+    if (disposed) return
+    if (probe.status === 'fulfilled') {
+      sandbox.value = probe.value
+      sandboxError.value = ''
+    } else {
+      sandboxError.value = String(probe.reason?.message ?? probe.reason)
+    }
+    if (!silent && error.value) message.error(error.value)
   } finally {
     loading.value = false
   }
 }
 
 async function reloadInstalled() {
+  const request = ++listRequest
   try {
     const list = await pluginList()
+    if (disposed || request !== listRequest) return
     installed.value = Array.isArray(list) ? list : []
+    listError.value = ''
   } catch (e: any) {
-    error.value = String(e?.message ?? e)
+    if (!disposed && request === listRequest) listError.value = String(e?.message ?? e)
   }
 }
 
@@ -94,6 +113,7 @@ const installError = ref('')
 const installOk = ref('')
 
 async function installFromUrl() {
+  if (installBusy.value || pending.value.size) return
   const url = installUrl.value.trim()
   if (!url) return
   if (!inTauri) {
@@ -105,6 +125,8 @@ async function installFromUrl() {
   installOk.value = ''
   try {
     const info = await pluginInstallFromUrl(url)
+    ++listRequest
+    installed.value = [...installed.value.filter((plugin) => plugin.id !== info.id), info]
     const name = info?.name || info?.id || url
     installOk.value = String(name)
     message.success(`${tr('插件已安装')}：${name}`)
@@ -120,13 +142,16 @@ async function installFromUrl() {
 
 /* ------------------------- 卸载 / 启用 / 测试 ------------------------- */
 async function uninstall(p: PluginInfo) {
+  if (pending.value.has(p.id) || installBusy.value) return
   if (!inTauri) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
-  busy.value = `uninstall:${p.id}`
+  pending.value.set(p.id, 'uninstall')
   try {
     await pluginUninstall(p.id)
+    ++listRequest
+    installed.value = installed.value.filter((plugin) => plugin.id !== p.id)
     message.success(`${tr('插件已卸载')}：${p.name || p.id}`)
     const tr2 = { ...testResults.value }
     delete tr2[p.id]
@@ -135,33 +160,37 @@ async function uninstall(p: PluginInfo) {
   } catch (e: any) {
     message.error(String(e?.message ?? e))
   } finally {
-    busy.value = ''
+    pending.value.delete(p.id)
   }
 }
 
 async function toggle(p: PluginInfo, enabled: boolean) {
+  if (pending.value.has(p.id) || installBusy.value) return
   if (!inTauri) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
-  busy.value = `toggle:${p.id}`
+  pending.value.set(p.id, 'toggle')
   try {
     await pluginSetEnabled(p.id, enabled)
+    ++listRequest
+    installed.value = installed.value.map((plugin) => plugin.id === p.id ? { ...plugin, enabled } : plugin)
     message.success(`${enabled ? tr('已启用') : tr('已停用')}：${p.name || p.id}`)
     await reloadInstalled()
   } catch (e: any) {
     message.error(String(e?.message ?? e))
   } finally {
-    busy.value = ''
+    pending.value.delete(p.id)
   }
 }
 
 async function runTest(p: PluginInfo) {
+  if (pending.value.has(p.id) || installBusy.value) return
   if (!inTauri) {
     message.warning(tr('该功能需要在桌面客户端中运行'))
     return
   }
-  busy.value = `test:${p.id}`
+  pending.value.set(p.id, 'test')
   try {
     const r = await pluginTest(p.id)
     testResults.value = { ...testResults.value, [p.id]: r }
@@ -171,7 +200,7 @@ async function runTest(p: PluginInfo) {
       [p.id]: { ok: false, logs: [], error: String(e?.message ?? e) },
     }
   } finally {
-    busy.value = ''
+    pending.value.delete(p.id)
   }
 }
 
@@ -182,6 +211,7 @@ const resolverResult = ref('')
 const resolverError = ref('')
 
 async function runResolvers() {
+  if (resolverBusy.value) return
   const url = resolverUrl.value.trim()
   if (!url) return
   if (!inTauri) {
@@ -202,23 +232,33 @@ async function runResolvers() {
 }
 
 /* ------------------------- 事件订阅 ------------------------- */
-let offEvent: (() => void) | null = null
-let offInstalled: (() => void) | null = null
+const subscriptions: (() => void)[] = []
 
-onMounted(async () => {
-  await refreshAll(true)
+async function retainSubscription(subscription: Promise<() => void>) {
+  try {
+    const off = await subscription
+    if (disposed) off()
+    else subscriptions.push(off)
+  } catch (e: any) {
+    if (!disposed) subscriptionError.value = String(e?.message ?? e)
+  }
+}
+
+onMounted(() => {
+  void refreshAll(true)
   // 事件日志 UI 已移除（插件页极简）：仍订阅事件，只把错误级别转成一条提示
-  offEvent = await onPluginEvent((p) => {
-    if ((p.level || '').toLowerCase() === 'error') message.error(`${p.id ? `${p.id} · ` : ''}${p.message}`)
-  })
-  offInstalled = await onPluginInstalled(async () => {
-    await reloadInstalled()
-  })
+  void retainSubscription(onPluginEvent((p) => {
+    if (!disposed && (p.level || '').toLowerCase() === 'error') message.error(`${p.id ? `${p.id} · ` : ''}${p.message}`)
+  }))
+  void retainSubscription(onPluginInstalled(() => {
+    if (!disposed) void reloadInstalled()
+  }))
 })
 
 onUnmounted(() => {
-  offEvent?.()
-  offInstalled?.()
+  disposed = true
+  ++listRequest
+  subscriptions.splice(0).forEach((off) => off())
 })
 
 const sandboxReady = computed(() => !!sandbox.value?.available)
@@ -242,7 +282,7 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
         />
         <button
           class="umi-btn-primary umi-btn-sm whitespace-nowrap"
-          :disabled="installBusy || !installUrl.trim()"
+          :disabled="installBusy || !!pending.size || !installUrl.trim()"
           @click="installFromUrl"
         >
           {{ installBusy ? $t('安装中…') : $t('安装') }}
@@ -321,12 +361,31 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
     <div class="umi-card p-4" data-test="plugin-installed">
       <div class="umi-card-title">
         <NIcon :size="14" :component="ListOutline" class="text-accent" />{{ $t('已安装插件') }}
-        <span class="s-surface-2 s-text-3 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums">{{ installed.length }}</span>
+        <span class="s-surface-2 s-text-3 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums">{{ filteredPlugins.length }} / {{ installed.length }}</span>
+      </div>
+
+      <div v-if="installed.length" class="mb-3 flex flex-wrap gap-2">
+        <input
+          v-model="search"
+          class="umi-input min-w-0 flex-1 !text-[11.5px]"
+          type="search"
+          :placeholder="$t('搜索插件（名称、说明或来源）')"
+          :aria-label="$t('搜索插件（名称、说明或来源）')"
+          data-test="plugin-search"
+        />
+        <select v-model="statusFilter" class="umi-input !w-auto !text-[11.5px]" :aria-label="$t('插件状态')" data-test="plugin-status-filter">
+          <option value="all">{{ $t('全部插件') }}</option>
+          <option value="enabled">{{ $t('已启用') }}</option>
+          <option value="disabled">{{ $t('已停用') }}</option>
+        </select>
+        <button v-if="search || statusFilter !== 'all'" class="umi-btn umi-btn-sm" data-test="plugin-clear-filters" @click="search = ''; statusFilter = 'all'">
+          {{ $t('清除筛选') }}
+        </button>
       </div>
 
       <div class="space-y-2">
         <div
-          v-for="p in installed"
+          v-for="p in filteredPlugins"
           :key="p.id"
           class="umi-inner"
         >
@@ -342,7 +401,7 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
                 <span class="s-text text-[12.5px] font-medium">{{ p.name || p.id }}</span>
                 <span v-if="p.version" class="umi-chip !text-[10px]">v{{ p.version }}</span>
                 <span v-if="p.source" class="s-text-3 s-surface-3 rounded-full px-1.5 py-px text-[10px]">{{ p.source }}</span>
-                <span v-if="busy.endsWith(`:${p.id}`)" class="s-text-3 text-[10px]">{{ $t('处理中…') }}</span>
+                <span v-if="pending.has(p.id)" class="s-text-3 text-[10px]">{{ $t('处理中…') }}</span>
               </div>
               <div v-if="p.description" class="s-text-3 mt-0.5 text-[10.5px] leading-relaxed">{{ p.description }}</div>
               <div class="s-text-3 mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 break-all font-mono text-[10px]">
@@ -376,20 +435,22 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
               <NSwitch
                 :value="p.enabled"
                 size="small"
-                :disabled="busy === `toggle:${p.id}`"
+                :disabled="pending.has(p.id) || installBusy"
+                :loading="pending.get(p.id) === 'toggle'"
+                :aria-label="`${p.name || p.id} · ${p.enabled ? $t('已启用') : $t('已停用')}`"
                 @update:value="(v) => toggle(p, !!v)"
               />
               <div class="flex gap-1.5">
                 <button
                   class="umi-btn umi-btn-xs"
-                  :disabled="busy === `test:${p.id}`"
+                  :disabled="pending.has(p.id) || installBusy"
                   @click="runTest(p)"
                 >
-                  {{ busy === `test:${p.id}` ? $t('测试中…') : $t('测试') }}
+                  {{ pending.get(p.id) === 'test' ? $t('测试中…') : $t('测试') }}
                 </button>
                 <button
                   class="umi-btn umi-btn-xs hover:!border-rose-400/40"
-                  :disabled="busy === `uninstall:${p.id}`"
+                  :disabled="pending.has(p.id) || installBusy"
                   @click="uninstall(p)"
                 >
                   {{ $t('卸载') }}
@@ -402,6 +463,9 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
         <!-- 空态直接内联，不再嵌一张 umi-card -->
         <div v-if="!installed.length" class="s-text-3 flex items-center gap-2 py-6 text-[11.5px]">
           <NIcon :size="15" :component="ExtensionPuzzleOutline" />{{ $t('还没有安装任何插件') }}
+        </div>
+        <div v-else-if="!filteredPlugins.length" class="s-text-3 py-6 text-[11.5px]">
+          {{ $t('没有匹配的插件，请调整搜索或筛选条件') }}
         </div>
       </div>
     </div>
@@ -417,6 +481,7 @@ const sandboxReady = computed(() => !!sandbox.value?.available)
           class="umi-input flex-1 !text-[11.5px]"
           :placeholder="$t('粘贴链接，用已启用插件跑一遍解析器')"
           spellcheck="false"
+          :disabled="resolverBusy"
           @keyup.enter="runResolvers"
         />
         <button

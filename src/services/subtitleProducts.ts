@@ -112,6 +112,7 @@ export function expectedProductPath(
 export interface SubtitleProductRow {
   video_path: string
   language: string
+  model?: string
   subtitle_path?: string | null
   /** 这一行是不是「额外生成的那份英文字幕」（译文的产物名一定带 `-to-en`） */
   translated?: boolean
@@ -126,6 +127,8 @@ export interface SubtitleProductRow {
  */
 export function rowProductPath(row: SubtitleProductRow): string {
   const rec = String(row.subtitle_path ?? '').trim()
+  // New cloud jobs persist their exact reserved path; only legacy Whisper rows need repair.
+  if (rec && row.model?.startsWith('cloud:')) return rec
   if (row.translated) {
     // 目录沿用记录里那份（可能是历史 output_dir），没记录就用视频所在目录
     const ext = productExt(rec)

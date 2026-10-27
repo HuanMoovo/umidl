@@ -265,15 +265,18 @@ export function availableOnly(catalog: ConvertFormatCatalog): ConvertFormatCatal
 export const convertFormats = () => call<ConvertFormatCatalog>('convert_formats')
 
 /** 取目录：Tauri 走后端命令，浏览器预览直接用内置表 */
-export async function loadFormatCatalog(): Promise<{ catalog: ConvertFormatCatalog; live: boolean }> {
+export async function loadFormatCatalog(inputFile?: string, refresh = false): Promise<{ catalog: ConvertFormatCatalog; live: boolean }> {
   if (!isTauri()) return { catalog: FALLBACK_CATALOG, live: false }
   try {
-    const raw = await convertFormats()
+    const raw = inputFile
+      ? await call<ConvertFormatCatalog>('convert_targets', refresh ? { path: inputFile, refresh: true } : { path: inputFile })
+      : await convertFormats()
     const catalog = normalizeCatalog(raw)
-    if (!catalog.groups.length) return { catalog: FALLBACK_CATALOG, live: false }
+    if (!catalog.groups.length && !inputFile) throw new Error('Empty conversion catalog')
     return { catalog, live: true }
-  } catch {
-    return { catalog: FALLBACK_CATALOG, live: false }
+  } catch (error) {
+    if (inputFile) throw error
+    return { catalog: { total: 0, groups: [], engines: {} }, live: false }
   }
 }
 
