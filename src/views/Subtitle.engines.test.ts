@@ -21,6 +21,7 @@ const task = (id: string, model = 'sensevoice'): SubtitleTask => ({ id, model, v
 const status = (engine: string, ready = true) => ({ engine, runtime_ready: ready, model_ready: ready, ready, message: ready ? 'ready' : 'not installed', model_dir: '' })
 let app: App | undefined
 let pinia: Pinia | undefined
+let messageProvider: { destroyAll: () => void } | null = null
 let commands: { cmd: string; args: any }[]
 let handlers: Record<string, (args: any) => unknown>
 let picked: string | null
@@ -58,7 +59,9 @@ async function mount(opts: { ffmpeg?: boolean } = {}) {
   const settings = useSettingsStore(pinia)
   settings.loaded = true
   settings.patch({ whisper_model: 'tiny', subtitle_language: 'zh', subtitle_format: 'vtt' })
-  app = createApp({ setup: () => () => h(NMessageProvider, null, { default: () => h(Subtitle) }) })
+  app = createApp({ setup: () => () => h(NMessageProvider, {
+    ref: (instance: any) => { messageProvider = instance },
+  }, { default: () => h(Subtitle) }) })
   app.use(pinia).use(i18n).mount(host)
   await flush()
   picked = VIDEO
@@ -73,6 +76,13 @@ async function engine(value: 'whisper' | 'chinese' | 'cloud') {
 async function provider(value: string) {
   select('[data-test="subtitle-cloud-provider"]', value)
   await flush()
+}
+async function unmountView() {
+  await nextTick()
+  messageProvider?.destroyAll()
+  app?.unmount()
+  app = undefined
+  messageProvider = null
 }
 beforeEach(() => {
   commands = []
@@ -100,8 +110,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }))
 })
 afterEach(async () => {
-  app?.unmount()
-  app = undefined
+  await unmountView()
   if (pinia) disposePinia(pinia)
   pinia = undefined
   document.body.innerHTML = ''
@@ -110,6 +119,24 @@ afterEach(async () => {
 })
 
 describe('Subtitle engine ownership', () => {
+  it('clears the notification timeout when the page is unmounted', async () => {
+    const timeouts = vi.spyOn(window, 'setTimeout')
+    const cleared = vi.spyOn(window, 'clearTimeout')
+    try {
+      await mount()
+      click('[data-test="subtitle-start"]')
+      await flush()
+      const ids = timeouts.mock.calls.flatMap(([callback, delay], index) =>
+        typeof callback === 'function' && callback.name === 'hide' && delay === 3000
+          ? [timeouts.mock.results[index].value] : [])
+      expect(ids.length).toBeGreaterThan(0)
+      await unmountView()
+      for (const id of ids) expect(cleared).toHaveBeenCalledWith(id)
+    } finally {
+      timeouts.mockRestore()
+      cleared.mockRestore()
+    }
+  })
   it('defaults to Groq and clears all credentials when switching providers', async () => {
     await mount()
     await engine('cloud')

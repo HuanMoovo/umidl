@@ -32,7 +32,7 @@
 
 **下载 → 转换 → 字幕**：可选择本地识别，或使用支持的云端语音接口。
 
-| 能力 | 现状（1.10.0） |
+| 能力 | 现状（1.10.1） |
 | --- | --- |
 | **本地处理与云端识别** | 转换和本地字幕在本机处理；选择云端字幕时，音频会上传至选定的服务商，可能产生费用 |
 | **下载** | 两条链路按链接类型自动路由（yt-dlp 站点解析 / aria2c 分段并行）；分 P、合集、HLS/DASH 自动合并；暂停、断点续传、全局限速 |
@@ -69,7 +69,7 @@ npx tauri build --bundles deb,appimage  # Linux
 ```
 
 - [Releases](https://github.com/HuanMoovo/umidl/releases) 提供已成功构建并发布的 Windows、macOS 和 Linux 安装包；具体版本及文件以发布页为准。构建日志和临时产物可在 Actions 的 `Release` 工作流中查看。
-- 1.10.0 的 macOS / Linux 版本需以本次构建结果为准，尚未完成真机回归；macOS 的 Whisper 自动安装暂不支持，需自行提供可用的运行时。aria2 在这两个平台没有官方静态包，安装引导会给出 `brew` / `apt` 指引。
+- 1.10.1 的 macOS / Linux 版本需以本次构建结果为准，尚未完成真机回归；macOS 的 Whisper 自动安装暂不支持，需自行提供可用的运行时。aria2 在这两个平台没有官方静态包，安装引导会给出 `brew` / `apt` 指引。
 
 ### 环境要求（源码）
 
@@ -90,7 +90,7 @@ npx tauri build --bundles deb,appimage  # Linux
 | Linux | x64 | `.AppImage` / `.deb` | ✅ **已发布**（1.8.11，deb 6.85 MiB / AppImage 81.4 MiB，CI 构建，未真机回归） |
 | Android | — | — | 🔴 实验性作业，需移动端适配，暂不提供产物 |
 
-上表是历史 1.8.11 的验证记录，并非 1.10.0 的测试结论。新版跨平台产物以对应 [Release](https://github.com/HuanMoovo/umidl/releases) 和构建结果为准；macOS 安装包未配置签名和公证。
+上表是历史 1.8.11 的验证记录，并非 1.10.1 的测试结论。新版跨平台产物以对应 [Release](https://github.com/HuanMoovo/umidl/releases) 和构建结果为准；macOS 安装包未配置签名和公证。
 
 ---
 
@@ -170,7 +170,7 @@ npx tauri build --bundles deb,appimage  # Linux
 - 导出格式：SRT / ASS / VTT / TXT / JSON
 - **识别语言可多选（1.6 新增）**：每个选中语言各起一个任务，可叠加"翻译成英文"再生成一份英文轨
 - 本地 Whisper 提供自动语言检测及中 / 英 / 日 / 韩 / 法 / 德 / 西 / 俄选项，6 档模型按需下载。
-- 本地中文识别可选择 SenseVoice 或 Paraformer；模型和独立运行环境按需安装，1.10.0 新增中文模型尚未完成真实语音识别验收。
+- 本地中文识别可选择 SenseVoice 或 Paraformer；模型和独立运行环境按需安装，1.10.1 新增中文模型尚未完成真实语音识别验收。
 - 云端支持 OpenAI、Groq、Fish Audio、Deepgram、AssemblyAI、Azure Speech、腾讯云、百度智能云、讯飞开放平台，也可填写兼容接口。服务商的模型、语言、地区和权限要求不同；百度分句时间戳接口需相应产品权限。
 - 选择云端时音频上传到所选服务商；凭证仅在当前页面会话使用，不写入任务记录。切换服务商或重试时需要重新填写。新增适配已通过模拟接口测试，真实账号与识别效果仍需逐家验证；此前 Groq 的短音频调用通过，Fish Audio 返回余额不足。
 
